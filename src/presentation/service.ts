@@ -16,34 +16,85 @@ export interface DisplayBounds {
 }
 
 /**
+ * Retrieve Electron screen module if available in Desktop environment.
+ */
+export function getElectronScreenModule(win?: Window): any {
+  if (!Platform.isDesktop) return null;
+
+  const targetWin = win ?? (typeof window !== 'undefined' ? window : (globalThis as any));
+  try {
+    const req = (targetWin as any)?.require ?? (window as any)?.require ?? (globalThis as any)?.require;
+    if (typeof req === 'function') {
+      const electron = req('electron');
+      return electron?.screen ?? electron?.remote?.screen ?? null;
+    }
+  } catch {}
+  return null;
+}
+
+/**
+ * Detect if 2 or more screens are connected.
+ * Supports Electron desktop environment and modern Window Management API (window.screen.isExtended).
+ */
+export function hasMultipleScreens(win?: Window): boolean {
+  if (!Platform.isDesktop) return false;
+
+  const targetWin = win ?? (typeof window !== 'undefined' ? window : (globalThis as any));
+  try {
+    const displays = getElectronScreenModule(targetWin)?.getAllDisplays?.();
+    if (Array.isArray(displays)) return displays.length >= 2;
+  } catch (err) {
+    console.debug('[marp-presentation] multi-screen detection failed:', err);
+  }
+
+  return !!(targetWin?.screen as any)?.isExtended;
+}
+
+/**
+ * Listen for display connect/disconnect events across Electron and browser APIs.
+ * Returns an unsubscribe cleanup function.
+ */
+export function observeScreenChanges(callback: () => void, win?: Window): () => void {
+  const targetWin = win ?? (typeof window !== 'undefined' ? window : (globalThis as any));
+  const screenModule = getElectronScreenModule(targetWin);
+  if (screenModule && typeof screenModule.on === 'function') {
+    screenModule.on('display-added', callback);
+    screenModule.on('display-removed', callback);
+    return () => {
+      screenModule.removeListener?.('display-added', callback);
+      screenModule.removeListener?.('display-removed', callback);
+    };
+  }
+
+  const screenObj = targetWin?.screen;
+  if (screenObj && typeof screenObj.addEventListener === 'function') {
+    screenObj.addEventListener('change', callback);
+    return () => screenObj.removeEventListener?.('change', callback);
+  }
+
+  return () => {};
+}
+
+/**
  * Detect if multiple screens are available on desktop.
  * If 2 or more displays exist, returns the bounds of the other display
  * (not the display containing the current window).
  */
-export function getOtherDisplayBounds(): DisplayBounds | null {
+export function getOtherDisplayBounds(win?: Window): DisplayBounds | null {
   if (!Platform.isDesktop) return null;
 
+  const targetWin = win ?? (typeof window !== 'undefined' ? window : (globalThis as any));
   try {
-    const req = (window as any).require ?? (globalThis as any).require;
-    if (typeof req !== 'function') return null;
-
-    const electron = req('electron');
-    const screenModule = electron?.screen ?? electron?.remote?.screen;
-    if (!screenModule || typeof screenModule.getAllDisplays !== 'function') return null;
-
-    const displays = screenModule.getAllDisplays();
+    const screenModule = getElectronScreenModule(targetWin);
+    const displays = screenModule?.getAllDisplays?.();
     if (!Array.isArray(displays) || displays.length <= 1) return null;
 
-    const winX = window.screenX ?? window.screenLeft ?? 0;
-    const winY = window.screenY ?? window.screenTop ?? 0;
-
-    let currentDisplay: any = null;
-    if (typeof screenModule.getDisplayNearestPoint === 'function') {
-      currentDisplay = screenModule.getDisplayNearestPoint({ x: winX, y: winY });
-    }
+    const winX = targetWin.screenX ?? targetWin.screenLeft ?? 0;
+    const winY = targetWin.screenY ?? targetWin.screenTop ?? 0;
+    const currentDisplay = screenModule.getDisplayNearestPoint?.({ x: winX, y: winY });
 
     const other = displays.find((d: any) => d.id !== currentDisplay?.id) ?? displays[1];
-    if (other && other.bounds) {
+    if (other?.bounds) {
       return {
         x: other.bounds.x,
         y: other.bounds.y,

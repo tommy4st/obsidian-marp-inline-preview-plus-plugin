@@ -98,6 +98,62 @@
 /*
  * Presentation Mode (Audience Display)
  */
+.workspace-leaf-content[data-type="marp-presentation-view"] .view-header,
+.workspace-leaf-content:has(.marp-presentation-view) .view-header {
+  display: none !important;
+}
+
+.workspace-leaf-content[data-type="marp-presentation-view"],
+.workspace-leaf-content:has(.marp-presentation-view),
+.workspace-leaf-content[data-type="marp-presentation-view"] .view-content,
+.workspace-leaf-content:has(.marp-presentation-view) .view-content,
+.workspace-leaf:has(.marp-presentation-view),
+.workspace-tabs:has(.workspace-leaf.mod-active .marp-presentation-view) {
+  padding: 0 !important;
+  margin: 0 !important;
+  border: none !important;
+}
+
+body:has(.workspace-leaf.mod-active .marp-presentation-view) .workspace-tab-header-container,
+body:has(.workspace-leaf.mod-active .marp-presentation-view) .mobile-navbar,
+body:has(.workspace-leaf.mod-active .marp-presentation-view) .mobile-navbar-container,
+body:has(.workspace-leaf.mod-active .marp-presentation-view) .workspace-drawer,
+body:has(.workspace-leaf.mod-active .marp-presentation-view) .workspace-drawer-backdrop {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+/* Eliminate status bar offset and app-level padding so presentation fills edge-to-edge */
+body:has(.workspace-leaf.mod-active .marp-presentation-view) .app-container,
+body:has(.workspace-leaf.mod-active .marp-presentation-view) .horizontal-main-container,
+body:has(.workspace-leaf.mod-active .marp-presentation-view) .workspace,
+body:has(.workspace-leaf.mod-active .marp-presentation-view) .workspace-split,
+body:has(.workspace-leaf.mod-active .marp-presentation-view) .workspace-tabs,
+body:has(.workspace-leaf.mod-active .marp-presentation-view) .workspace-tab-container,
+body:has(.workspace-leaf.mod-active .marp-presentation-view) .workspace-leaf,
+body:has(.workspace-leaf.mod-active .marp-presentation-view) .workspace-leaf-content {
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+  border-top: none !important;
+}
+
+/* On mobile, pin the active presentation view to the absolute viewport edges */
+.is-mobile .workspace-leaf.mod-active .marp-presentation-view,
+.is-mobile .workspace-leaf-content[data-type="marp-presentation-view"] .marp-presentation-view {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  height: 100dvh !important;
+  z-index: 1000 !important;
+}
+
 .marp-presentation-view {
   position: relative;
   width: 100%;
@@ -106,6 +162,7 @@
   overflow: hidden;
   outline: none;
   user-select: none;
+  touch-action: none;
 }
 
 .marp-presentation-stage {
@@ -115,6 +172,7 @@
   align-items: center;
   justify-content: center;
   overflow: hidden;
+  touch-action: none;
 }
 
 .marp-presentation-slide-wrapper {
@@ -148,10 +206,11 @@
 
 .marp-presentation-hud {
   position: absolute;
-  bottom: 24px;
+  bottom: max(24px, calc(env(safe-area-inset-bottom, 0px) + 12px));
   left: 50%;
   transform: translateX(-50%) translateY(20px);
   opacity: 0;
+  pointer-events: none;
   transition: all 0.25s ease;
   z-index: 20;
   display: flex;
@@ -163,12 +222,28 @@
   border-radius: 9999px;
   border: 1px solid rgba(255, 255, 255, 0.18);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+  max-width: calc(100vw - 24px);
+  box-sizing: border-box;
 }
 
-.marp-presentation-hud.is-visible,
-.marp-presentation-hud:hover {
+@media (max-width: 480px) {
+  .marp-presentation-hud {
+    padding: 4px 8px;
+    gap: 4px;
+  }
+  .marp-presentation-hud-btn {
+    padding: 4px;
+  }
+  .marp-presentation-hud-counter {
+    font-size: 11px;
+    padding: 0 4px;
+  }
+}
+
+.marp-presentation-hud.is-visible {
   opacity: 1;
   transform: translateX(-50%) translateY(0);
+  pointer-events: auto;
 }
 
 .marp-presentation-hud-counter {
@@ -212,6 +287,7 @@
   pointer-events: none;
   z-index: 25;
   display: none;
+  touch-action: none;
 }
 
 .marp-presentation-view.is-laser-active,
@@ -241,9 +317,6 @@
   cursor: none !important;
 }
 
-.marp-presentation-view.is-laser-active .marp-presentation-hud-btn {
-  cursor: pointer;
-}
 
 
 /*
@@ -488,5 +561,15 @@
   font-size: 12px;
   color: var(--text-success, #48bb78);
   font-weight: 500;
+}
+
+/*
+ * Note view header presentation button
+ */
+.view-action.marp-view-action-presentation {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
 }
 

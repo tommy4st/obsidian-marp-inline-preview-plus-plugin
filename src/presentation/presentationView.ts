@@ -10,9 +10,45 @@ import {
   loadSlideDeck,
   safePaintFrame,
 } from './types';
-import { openPresenterView } from './service';
+import { openPresenterView, hasMultipleScreens, observeScreenChanges } from './service';
 
 import { LaserPointer, createExcalidrawLaserTrail } from './laserPointer';
+
+export async function hideMobileStatusBar(): Promise<void> {
+  try {
+    const win = (typeof window !== 'undefined' ? window : globalThis) as any;
+    const cap = win?.Capacitor;
+    const statusBar = cap?.Plugins?.StatusBar ?? win?.StatusBar;
+    if (statusBar) {
+      if (typeof statusBar.hide === 'function') {
+        await statusBar.hide();
+      }
+      if (typeof statusBar.setOverlaysWebView === 'function') {
+        await statusBar.setOverlaysWebView({ overlay: true });
+      }
+    }
+  } catch (err) {
+    console.debug('[marp-presentation] hideMobileStatusBar error:', err);
+  }
+}
+
+export async function showMobileStatusBar(): Promise<void> {
+  try {
+    const win = (typeof window !== 'undefined' ? window : globalThis) as any;
+    const cap = win?.Capacitor;
+    const statusBar = cap?.Plugins?.StatusBar ?? win?.StatusBar;
+    if (statusBar) {
+      if (typeof statusBar.show === 'function') {
+        await statusBar.show();
+      }
+      if (typeof statusBar.setOverlaysWebView === 'function') {
+        await statusBar.setOverlaysWebView({ overlay: false });
+      }
+    }
+  } catch (err) {
+    console.debug('[marp-presentation] showMobileStatusBar error:', err);
+  }
+}
 
 export class MarpPresentationView extends ItemView {
   public file: TFile | null = null;
@@ -27,6 +63,7 @@ export class MarpPresentationView extends ItemView {
   private hudEl!: HTMLElement;
   private hudCounterEl!: HTMLElement;
   private laserBtn!: HTMLElement;
+  private presenterBtn: HTMLElement | null = null;
   private hudHideTimeout: any = null;
 
   public isLaserActive = false;
@@ -39,6 +76,7 @@ export class MarpPresentationView extends ItemView {
   private resizeObserver: ResizeObserver | null = null;
   private touchStartX = 0;
   private touchStartY = 0;
+  private lastTouchSwipeTime = 0;
 
   constructor(leaf: WorkspaceLeaf, private plugin: MarpInlinePreviewPlugin) {
     super(leaf);
@@ -111,22 +149,24 @@ export class MarpPresentationView extends ItemView {
     });
     this.registerEvent(fileModifyRef);
 
+    const onFocusOrClick = () => {
+      const doc = contentEl.ownerDocument || document;
+      if (!doc.fullscreenElement) {
+        void this.enterFullscreen();
+      }
+    };
+
     if (Platform.isDesktop && this.isPopout()) {
       void this.enterFullscreen();
       const win = contentEl.ownerDocument?.defaultView || window;
-      const onFocusOrClick = () => {
-        const doc = contentEl.ownerDocument || document;
-        if (!doc.fullscreenElement) {
-          void this.enterFullscreen();
-        }
-      };
       win.addEventListener('focus', onFocusOrClick);
-      contentEl.addEventListener('pointerdown', onFocusOrClick);
-      this.unsubs.push(() => {
-        win.removeEventListener('focus', onFocusOrClick);
-        contentEl.removeEventListener('pointerdown', onFocusOrClick);
-      });
+      this.unsubs.push(() => win.removeEventListener('focus', onFocusOrClick));
+    } else {
+      void this.enterFullscreen();
     }
+
+    contentEl.addEventListener('pointerdown', onFocusOrClick);
+    this.unsubs.push(() => contentEl.removeEventListener('pointerdown', onFocusOrClick));
 
     const focusView = () => {
       try {
@@ -138,6 +178,11 @@ export class MarpPresentationView extends ItemView {
     focusView();
     setTimeout(focusView, 50);
     setTimeout(focusView, 150);
+
+    try {
+      this.app.workspace.leftSplit?.collapse?.();
+      this.app.workspace.rightSplit?.collapse?.();
+    } catch {}
   }
 
   async onClose(): Promise<void> {
@@ -208,16 +253,22 @@ export class MarpPresentationView extends ItemView {
     this.laserCanvas = container.createEl('canvas', { cls: 'marp-laser-canvas' });
     this.resizeLaserCanvas();
 
+    let startX = 0;
+    let startY = 0;
+    let hasDrawn = false;
+
     const onPointerDown = (e: PointerEvent) => {
       if ((e.target as HTMLElement)?.closest('.marp-presentation-hud')) return;
-      if (this.isLaserActive && e.button === 0) {
+      if (this.isLaserActive && (e.button === 0 || e.pointerType === 'touch')) {
+        e.preventDefault();
+        e.stopPropagation();
         this.isLaserDrawing = true;
+        startX = e.clientX;
+        startY = e.clientY;
+        hasDrawn = false;
         const rect = this.laserCanvas.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
-
         this.currentTrail = createExcalidrawLaserTrail(4, this.plugin.settings.laserDecayDuration);
-        this.currentTrail.addPoint([x, y, performance.now()]);
+        this.currentTrail.addPoint([e.clientX - rect.left, e.clientY - rect.top, performance.now()]);
         this.startLaserAnimation();
         try {
           container.setPointerCapture?.(e.pointerId);
@@ -226,21 +277,33 @@ export class MarpPresentationView extends ItemView {
     };
 
     const onPointerMove = (e: PointerEvent) => {
-      this.showHudTemporarily();
-      if (this.isLaserActive && this.isLaserDrawing && this.currentTrail) {
+      if (!this.isLaserActive) {
+        this.showHudTemporarily();
+        return;
+      }
+      if (this.isLaserDrawing && this.currentTrail) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (Math.hypot(e.clientX - startX, e.clientY - startY) > (e.pointerType === 'touch' ? 15 : 6)) {
+          hasDrawn = true;
+          this.hideHud();
+        }
         const rect = this.laserCanvas.getBoundingClientRect();
         const events = (e as any).getCoalescedEvents?.() || [e];
         for (const evt of events) {
-          const x = evt.clientX - rect.left;
-          const y = evt.clientY - rect.top;
-          this.currentTrail.addPoint([x, y, performance.now()]);
+          this.currentTrail.addPoint([evt.clientX - rect.left, evt.clientY - rect.top, performance.now()]);
         }
         this.startLaserAnimation();
       }
     };
 
     const onPointerUp = (e: PointerEvent) => {
+      if ((e.target as HTMLElement)?.closest('.marp-presentation-hud')) return;
       if (this.isLaserDrawing) {
+        if (this.isLaserActive) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
         this.isLaserDrawing = false;
         if (this.currentTrail) {
           this.currentTrail.close();
@@ -254,10 +317,14 @@ export class MarpPresentationView extends ItemView {
             container.releasePointerCapture(e.pointerId);
           }
         } catch {}
+
+        if (this.isLaserActive && !hasDrawn) {
+          this.showHudTemporarily();
+        }
       }
     };
 
-    const onPointerLeave = () => {
+    const onPointerLeave = (e: PointerEvent) => {
       if (this.isLaserDrawing && this.currentTrail) {
         this.currentTrail.close();
         this.currentTrail.options.keepHead = false;
@@ -265,8 +332,10 @@ export class MarpPresentationView extends ItemView {
         this.currentTrail = null;
       }
       this.isLaserDrawing = false;
-      this.hudEl?.removeClass('is-visible');
-      this.contentEl.addClass('is-cursor-hidden');
+      if (e?.pointerType !== 'touch') {
+        this.hudEl?.removeClass('is-visible');
+        this.contentEl.addClass('is-cursor-hidden');
+      }
     };
 
     container.addEventListener('pointerdown', onPointerDown);
@@ -316,7 +385,7 @@ export class MarpPresentationView extends ItemView {
     if (!this.laserCanvas) return;
 
     const ctx = this.laserCanvas.getContext('2d');
-    if (!ctx) return;
+    if (!ctx || typeof ctx.quadraticCurveTo !== 'function') return;
 
     const dpr = window.devicePixelRatio || 1;
     ctx.clearRect(0, 0, this.laserCanvas.width, this.laserCanvas.height);
@@ -371,7 +440,12 @@ export class MarpPresentationView extends ItemView {
 
     this.showHudTemporarily();
 
-    if (!this.isLaserActive) {
+    if (this.isLaserActive) {
+      try {
+        this.app.workspace.leftSplit?.collapse?.();
+        this.app.workspace.rightSplit?.collapse?.();
+      } catch {}
+    } else {
       this.clearLaserTrails();
       if (this.laserAnimId !== null) {
         cancelAnimationFrame(this.laserAnimId);
@@ -402,7 +476,7 @@ export class MarpPresentationView extends ItemView {
       this.toggleLaserPointer();
     });
 
-    createIconButton(this.hudEl, 'marp-presentation-hud-btn', 'presentation', 'Open Presenter View (P)', (e) => {
+    this.presenterBtn = createIconButton(this.hudEl, 'marp-presentation-hud-btn', 'presentation', 'Open Presenter View (P)', (e) => {
       e.stopPropagation();
       if (this.file) {
         void openPresenterView(this.app, this.plugin, this.file, {
@@ -410,6 +484,13 @@ export class MarpPresentationView extends ItemView {
         });
       }
     });
+    this.updatePresenterButtonVisibility();
+    this.unsubs.push(
+      observeScreenChanges(
+        () => this.updatePresenterButtonVisibility(),
+        container.ownerDocument?.defaultView || window,
+      ),
+    );
 
     createIconButton(this.hudEl, 'marp-presentation-hud-btn', 'maximize', 'Toggle Fullscreen (F)', (e) => {
       e.stopPropagation();
@@ -421,12 +502,24 @@ export class MarpPresentationView extends ItemView {
       void this.exitPresentation();
     });
 
-    container.addEventListener('mousemove', () => this.showHudTemporarily());
+    const onMouseMove = (e: MouseEvent) => {
+      if (!this.isLaserActive || (e.target as HTMLElement)?.closest('.marp-presentation-hud')) {
+        this.showHudTemporarily();
+      }
+    };
+    container.addEventListener('mousemove', onMouseMove);
+    this.unsubs.push(() => container.removeEventListener('mousemove', onMouseMove));
     this.showHudTemporarily();
+  }
+
+  public updatePresenterButtonVisibility(): void {
+    if (!this.presenterBtn) return;
+    this.presenterBtn.style.display = hasMultipleScreens(this.contentEl?.ownerDocument?.defaultView || window) ? '' : 'none';
   }
 
   private showHudTemporarily(): void {
     if (!this.hudEl) return;
+    this.updatePresenterButtonVisibility();
     this.hudEl.addClass('is-visible');
     this.contentEl.removeClass('is-cursor-hidden');
     if (this.hudHideTimeout) clearTimeout(this.hudHideTimeout);
@@ -440,6 +533,11 @@ export class MarpPresentationView extends ItemView {
       this.hudEl.removeClass('is-visible');
       this.contentEl.addClass('is-cursor-hidden');
     }, 2500);
+  }
+
+  private hideHud(): void {
+    if (this.hudHideTimeout) clearTimeout(this.hudHideTimeout);
+    this.hudEl?.removeClass('is-visible');
   }
 
   private updateHud(): void {
@@ -492,7 +590,7 @@ export class MarpPresentationView extends ItemView {
         case 'p':
         case 'P':
           e.preventDefault();
-          if (this.file) {
+          if (this.file && hasMultipleScreens(this.contentEl?.ownerDocument?.defaultView || window)) {
             void openPresenterView(this.app, this.plugin, this.file, {
               slideIndex: this.session?.currentSlide ?? 0,
             });
@@ -538,6 +636,7 @@ export class MarpPresentationView extends ItemView {
   private setupClickNavigation(container: HTMLElement): void {
     const handleClick = (e: MouseEvent) => {
       if ((e.target as HTMLElement)?.closest('.marp-presentation-hud')) return;
+      if (Date.now() - this.lastTouchSwipeTime < 350) return;
       if (this.session?.isBlackout || this.session?.isWhiteout) {
         this.session.clearBlank();
         return;
@@ -558,27 +657,63 @@ export class MarpPresentationView extends ItemView {
 
   private setupTouchNavigation(container: HTMLElement): void {
     const onTouchStart = (e: TouchEvent) => {
-      if (!this.isLaserActive && e.touches.length > 0) {
+      if ((e.target as HTMLElement)?.closest('.marp-presentation-hud')) return;
+      if (this.isLaserActive) {
+        e.stopPropagation();
+        return;
+      }
+      this.showHudTemporarily();
+      const doc = container.ownerDocument || document;
+      if (!doc.fullscreenElement) {
+        void this.enterFullscreen();
+      }
+      if (e.touches.length > 0) {
         this.touchStartX = e.touches[0].clientX;
         this.touchStartY = e.touches[0].clientY;
       }
     };
 
+    const onTouchMove = (e: TouchEvent) => {
+      if (this.isLaserActive) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+      if (e.touches.length > 0) {
+        const dx = e.touches[0].clientX - this.touchStartX;
+        const dy = e.touches[0].clientY - this.touchStartY;
+        if (Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy)) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      }
+    };
+
     const onTouchEnd = (e: TouchEvent) => {
-      if (this.isLaserActive || e.changedTouches.length === 0) return;
+      if ((e.target as HTMLElement)?.closest('.marp-presentation-hud')) return;
+      if (this.isLaserActive) {
+        e.stopPropagation();
+        return;
+      }
+      if (e.changedTouches.length === 0) return;
       const dx = e.changedTouches[0].clientX - this.touchStartX;
       const dy = e.changedTouches[0].clientY - this.touchStartY;
       if (Math.abs(dx) > 50 && Math.abs(dy) < 100) {
+        this.lastTouchSwipeTime = Date.now();
         if (dx < 0) this.session?.next();
         else this.session?.prev();
       }
     };
 
     container.addEventListener('touchstart', onTouchStart, { passive: true });
+    container.addEventListener('touchmove', onTouchMove, { passive: false });
     container.addEventListener('touchend', onTouchEnd, { passive: true });
+    container.addEventListener('touchcancel', onTouchEnd, { passive: true });
     this.unsubs.push(() => {
       container.removeEventListener('touchstart', onTouchStart);
+      container.removeEventListener('touchmove', onTouchMove);
       container.removeEventListener('touchend', onTouchEnd);
+      container.removeEventListener('touchcancel', onTouchEnd);
     });
   }
 
@@ -602,12 +737,20 @@ export class MarpPresentationView extends ItemView {
     return doc !== undefined && doc !== document;
   }
 
-  public async enterFullscreen(retries = 6): Promise<boolean> {
+  public async enterFullscreen(retries = Platform.isDesktop ? 6 : 0): Promise<boolean> {
     try {
+      await hideMobileStatusBar();
       const doc = this.containerEl.ownerDocument || document;
       if (doc.fullscreenElement) return true;
-      await this.containerEl.requestFullscreen();
-      return true;
+      const target = (Platform.isDesktop ? this.containerEl : (doc.documentElement || this.containerEl)) as HTMLElement;
+      if (typeof target?.requestFullscreen === 'function') {
+        await target.requestFullscreen({ navigationUI: 'hide' } as any);
+        return true;
+      }
+      if (typeof this.containerEl?.requestFullscreen === 'function') {
+        await this.containerEl.requestFullscreen();
+        return true;
+      }
     } catch {
       if (retries > 0) {
         await new Promise((resolve) => setTimeout(resolve, 100));
@@ -615,10 +758,12 @@ export class MarpPresentationView extends ItemView {
       }
       return false;
     }
+    return false;
   }
 
   public async exitFullscreen(): Promise<void> {
     try {
+      await showMobileStatusBar();
       const doc = this.containerEl.ownerDocument || document;
       if (doc.fullscreenElement) {
         await doc.exitFullscreen();

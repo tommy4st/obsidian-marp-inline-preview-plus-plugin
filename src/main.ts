@@ -9,13 +9,15 @@ import { openPdfExportModal } from './export/service';
 import { MARP_PRESENTATION_VIEW_TYPE, MARP_PRESENTER_VIEW_TYPE } from './presentation/types';
 import { MarpPresentationView } from './presentation/presentationView';
 import { MarpPresenterView } from './presentation/presenterView';
-import { startPresentation, openPresenterView } from './presentation/service';
+import { startPresentation, openPresenterView, hasMultipleScreens } from './presentation/service';
+import { HeaderActionManager, isMarpFile } from './presentation/headerAction';
 
 
 export default class MarpInlinePreviewPlugin extends Plugin {
   settings: MarpSettings = { ...DEFAULT_SETTINGS };
   engine!: MarpEngine;
   themes!: ThemeResolver;
+  headerActions!: HeaderActionManager;
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -23,6 +25,7 @@ export default class MarpInlinePreviewPlugin extends Plugin {
 
     this.engine = new MarpEngine({ math: this.settings.math === 'off' ? false : 'katex' });
     this.themes = new ThemeResolver(this.app, this.engine);
+    this.headerActions = new HeaderActionManager(this.app, this);
 
     this.registerMarkdownPostProcessor(
       buildReadingPostProcessor({
@@ -44,7 +47,10 @@ export default class MarpInlinePreviewPlugin extends Plugin {
     );
 
     this.registerEvent(
-      this.app.metadataCache.on('changed', () => this.refreshActiveEditors()),
+      this.app.metadataCache.on('changed', (file) => {
+        this.refreshActiveEditors();
+        if (file) this.headerActions.updateForFile(file);
+      }),
     );
     this.registerEvent(
       this.app.vault.on('modify', (file) => {
@@ -148,14 +154,16 @@ export default class MarpInlinePreviewPlugin extends Plugin {
                 });
             });
 
-            menu.addItem((item) => {
-              item
-                .setTitle('Open Marp presenter view')
-                .setIcon('presentation')
-                .onClick(() => {
-                  void openPresenterView(this.app, this, file);
-                });
-            });
+            if (hasMultipleScreens()) {
+              menu.addItem((item) => {
+                item
+                  .setTitle('Open Marp presenter view')
+                  .setIcon('presentation')
+                  .onClick(() => {
+                    void openPresenterView(this.app, this, file);
+                  });
+              });
+            }
 
             if (Platform.isDesktop) {
               menu.addItem((item) => {
@@ -175,10 +183,53 @@ export default class MarpInlinePreviewPlugin extends Plugin {
         }
       }),
     );
+
+    this.registerEvent(
+      this.app.workspace.on('editor-menu', (menu, _editor, view) => {
+        const file = view instanceof MarkdownView ? view.file : this.app.workspace.getActiveFile();
+        if (file && isMarpFile(this.app, file)) {
+          menu.addItem((item) => {
+            item
+              .setTitle('Start Marp presentation')
+              .setIcon('presentation')
+              .onClick(() => {
+                void startPresentation(this.app, this, file);
+              });
+          });
+        }
+      }),
+    );
+
+    this.registerEvent(
+      this.app.workspace.on('active-leaf-change', (leaf) => {
+        this.headerActions.updateLeaf(leaf);
+      }),
+    );
+
+    this.registerEvent(
+      this.app.workspace.on('layout-change', () => {
+        this.headerActions.updateAll();
+      }),
+    );
+
+    this.registerEvent(
+      this.app.workspace.on('file-open', () => {
+        this.headerActions.updateAll();
+      }),
+    );
+
+    if (typeof this.app.workspace?.onLayoutReady === 'function') {
+      this.app.workspace.onLayoutReady(() => {
+        this.headerActions.updateAll();
+      });
+    } else {
+      this.headerActions.updateAll();
+    }
   }
 
 
   onunload(): void {
+    this.headerActions?.destroy();
     document.body.style.removeProperty('--marp-edit-preview-max-width');
   }
 

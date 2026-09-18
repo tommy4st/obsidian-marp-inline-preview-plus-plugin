@@ -79,14 +79,23 @@ export class ItemView extends Component {
   leaf: WorkspaceLeaf;
   containerEl: HTMLElement;
   contentEl: HTMLElement;
+  headerActionsEl: HTMLElement;
   scope: Scope | null = null;
   navigation = false;
 
   constructor(leaf: WorkspaceLeaf) {
     super();
     this.leaf = leaf;
-    this.app = leaf.app || new App();
+    if (leaf) leaf.view = this;
+    this.app = leaf?.app || new App();
     this.containerEl = document.createElement('div');
+    const header = document.createElement('div');
+    header.className = 'view-header';
+    this.headerActionsEl = document.createElement('div');
+    this.headerActionsEl.className = 'view-actions';
+    header.appendChild(this.headerActionsEl);
+    this.containerEl.appendChild(header);
+
     this.contentEl = document.createElement('div');
     this.containerEl.appendChild(this.contentEl);
   }
@@ -98,8 +107,60 @@ export class ItemView extends Component {
   async onClose(): Promise<void> {}
   getState(): Record<string, unknown> { return {}; }
   async setState(_state: any, _result?: any): Promise<void> {}
-  addAction(_icon: string, _title: string, _callback: (evt: MouseEvent) => any): HTMLElement {
-    return document.createElement('div');
+  addAction(icon: string, title: string, callback: (evt: MouseEvent) => any): HTMLElement {
+    const btn = document.createElement('div');
+    btn.className = 'clickable-icon view-action';
+    btn.setAttribute('aria-label', title);
+    btn.setAttribute('data-icon', icon);
+    btn.addEventListener('click', callback);
+    this.headerActionsEl.appendChild(btn);
+    return btn;
+  }
+}
+
+export class MarkdownView extends ItemView {
+  file: TFile | null = null;
+  editor: any = null;
+  getMode(): 'source' | 'preview' {
+    return 'source';
+  }
+  async save(): Promise<void> {}
+}
+
+export class MenuItem {
+  title: string = '';
+  icon: string = '';
+  onClickCb: ((evt: MouseEvent) => any) | null = null;
+  setTitle(title: string): this {
+    this.title = title;
+    return this;
+  }
+  setIcon(icon: string): this {
+    this.icon = icon;
+    return this;
+  }
+  onClick(cb: (evt: MouseEvent) => any): this {
+    this.onClickCb = cb;
+    return this;
+  }
+}
+
+export class Menu extends Component {
+  items: MenuItem[] = [];
+  addItem(cb: (item: MenuItem) => any): this {
+    const item = new MenuItem();
+    cb(item);
+    this.items.push(item);
+    return this;
+  }
+  showAtMouseEvent(_evt: MouseEvent): this {
+    return this;
+  }
+  showAtPosition(_pos: any): this {
+    return this;
+  }
+  hide(): this {
+    return this;
   }
 }
 

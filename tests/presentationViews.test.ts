@@ -1,10 +1,16 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { Platform } from 'obsidian';
 import { MarpPresentationView } from '../src/presentation/presentationView';
 import { MarpPresenterView } from '../src/presentation/presenterView';
 import { MARP_PRESENTATION_VIEW_TYPE, MARP_PRESENTER_VIEW_TYPE } from '../src/presentation/types';
 import { PresentationSession } from '../src/presentation/session';
-import { startPresentation, openPresenterView, getOtherDisplayBounds } from '../src/presentation/service';
+import {
+  startPresentation,
+  openPresenterView,
+  getOtherDisplayBounds,
+  hasMultipleScreens,
+} from '../src/presentation/service';
 
 function createMockLeaf(app: any) {
   return {
@@ -130,10 +136,57 @@ describe('MarpPresentationView and MarpPresenterView', () => {
       expect(view.isLaserActive).toBe(true);
       expect(view.contentEl.classList.contains('is-laser-active')).toBe(true);
 
-      // Dragging with laser pointer creates trails
-      view.contentEl.dispatchEvent(new PointerEvent('pointerdown', { clientX: 100, clientY: 100, button: 0 }));
-      view.contentEl.dispatchEvent(new PointerEvent('pointermove', { clientX: 120, clientY: 120 }));
-      view.contentEl.dispatchEvent(new PointerEvent('pointerup', { clientX: 120, clientY: 120 }));
+      // Dragging with laser pointer creates trails, hides HUD, and blocks sidebar swipe
+      const hud = view.contentEl.querySelector('.marp-presentation-hud');
+      const pDown = new PointerEvent('pointerdown', { clientX: 100, clientY: 100, button: 0 });
+      const pMove = new PointerEvent('pointermove', { clientX: 120, clientY: 120 });
+      const pUp = new PointerEvent('pointerup', { clientX: 120, clientY: 120 });
+      const tMove = new TouchEvent('touchmove', { cancelable: true });
+      const pDownSpy = vi.spyOn(pDown, 'preventDefault');
+      const pMoveSpy = vi.spyOn(pMove, 'preventDefault');
+      const tMoveSpy = vi.spyOn(tMove, 'preventDefault');
+
+      view.contentEl.dispatchEvent(pDown);
+      expect(pDownSpy).toHaveBeenCalled();
+
+      view.contentEl.dispatchEvent(pMove);
+      expect(pMoveSpy).toHaveBeenCalled();
+      expect(hud?.classList.contains('is-visible')).toBe(false);
+
+      view.contentEl.dispatchEvent(tMove);
+      expect(tMoveSpy).toHaveBeenCalled();
+
+      view.contentEl.dispatchEvent(pUp);
+      expect(hud?.classList.contains('is-visible')).toBe(false);
+
+      // Moving mouse while laser is active does NOT wake HUD
+      view.contentEl.dispatchEvent(new PointerEvent('pointermove', { clientX: 200, clientY: 200 }));
+      expect(hud?.classList.contains('is-visible')).toBe(false);
+      view.contentEl.dispatchEvent(new MouseEvent('mousemove', { clientX: 200, clientY: 200 }));
+      expect(hud?.classList.contains('is-visible')).toBe(false);
+
+      // Just clicking with laser pointer (no drag) reveals HUD toolbar
+      const pClickDown = new PointerEvent('pointerdown', { clientX: 100, clientY: 100, button: 0 });
+      const pClickUp = new PointerEvent('pointerup', { clientX: 100, clientY: 100, button: 0 });
+      view.contentEl.dispatchEvent(pClickDown);
+      view.contentEl.dispatchEvent(pClickUp);
+      expect(hud?.classList.contains('is-visible')).toBe(true);
+
+      // Hide HUD again to test touch tapping
+      hud?.classList.remove('is-visible');
+      expect(hud?.classList.contains('is-visible')).toBe(false);
+
+      // Tapping with touch (pointerdown + small jitter move + pointerup + pointerleave) reveals HUD
+      const tDown = new PointerEvent('pointerdown', { clientX: 150, clientY: 150, pointerType: 'touch' });
+      const tJitter = new PointerEvent('pointermove', { clientX: 158, clientY: 156, pointerType: 'touch' }); // 10px jitter
+      const tUp = new PointerEvent('pointerup', { clientX: 158, clientY: 156, pointerType: 'touch' });
+      const tLeave = new PointerEvent('pointerleave', { pointerType: 'touch' }); // fires on touch liftoff
+      view.contentEl.dispatchEvent(tDown);
+      view.contentEl.dispatchEvent(tJitter);
+      view.contentEl.dispatchEvent(tUp);
+      expect(hud?.classList.contains('is-visible')).toBe(true);
+      view.contentEl.dispatchEvent(tLeave);
+      expect(hud?.classList.contains('is-visible')).toBe(true); // NOT hidden by touch pointerleave!
 
       // Clicking while laser pointer is active should NOT advance slide
       view.contentEl.dispatchEvent(new MouseEvent('click', { clientX: 800, clientY: 400 }));
@@ -195,6 +248,122 @@ describe('MarpPresentationView and MarpPresenterView', () => {
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
       expect(view.session?.currentSlide).toBe(0);
 
+      await view.onClose();
+    });
+
+    it('supports mobile touch interactions: wakes HUD on touch and navigates on horizontal swipe', async () => {
+      vi.useFakeTimers();
+      try {
+        const leaf = createMockLeaf(app);
+        const view = new MarpPresentationView(leaf as any, mockPlugin as any);
+        await view.onOpen();
+        await view.loadFile(mockFile as any, 0);
+
+        const hud = view.contentEl.querySelector('.marp-presentation-hud');
+        expect(hud?.classList.contains('is-visible')).toBe(true);
+
+        // Advance timers to hide HUD
+        vi.advanceTimersByTime(2600);
+        expect(hud?.classList.contains('is-visible')).toBe(false);
+
+        // Touchstart on contentEl wakes the HUD
+        view.contentEl.dispatchEvent(new TouchEvent('touchstart', {
+          touches: [{ clientX: 200, clientY: 200 } as any],
+        }));
+        expect(hud?.classList.contains('is-visible')).toBe(true);
+
+        // Horizontal swipe left (dx = -80) advances to next slide
+        expect(view.session?.currentSlide).toBe(0);
+        view.contentEl.dispatchEvent(new TouchEvent('touchend', {
+          changedTouches: [{ clientX: 120, clientY: 205 } as any],
+        }));
+        expect(view.session?.currentSlide).toBe(1);
+
+        // Subsequent synthetic click within 350ms is debounced
+        view.contentEl.dispatchEvent(new MouseEvent('click', { clientX: 800, clientY: 400 }));
+        expect(view.session?.currentSlide).toBe(1);
+
+        // Horizontal swipe right (dx = +80) retreats to previous slide
+        view.contentEl.dispatchEvent(new TouchEvent('touchstart', {
+          touches: [{ clientX: 100, clientY: 200 } as any],
+        }));
+        view.contentEl.dispatchEvent(new TouchEvent('touchend', {
+          changedTouches: [{ clientX: 180, clientY: 205 } as any],
+        }));
+        expect(view.session?.currentSlide).toBe(0);
+
+        await view.onClose();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('manages mobile status bar and fullscreen request with navigationUI hide', async () => {
+      const origDesktop = Platform.isDesktop;
+      const origMobile = Platform.isMobile;
+      (Platform as any).isDesktop = false;
+      (Platform as any).isMobile = true;
+
+      try {
+        const leaf = createMockLeaf(app);
+        const view = new MarpPresentationView(leaf as any, mockPlugin as any);
+        await view.onOpen();
+
+        const mockStatusBar = {
+          hide: vi.fn().mockResolvedValue(undefined),
+          show: vi.fn().mockResolvedValue(undefined),
+          setOverlaysWebView: vi.fn().mockResolvedValue(undefined),
+        };
+        (window as any).Capacitor = {
+          Plugins: {
+            StatusBar: mockStatusBar,
+          },
+        };
+
+        const mockRequestFullscreen = vi.fn().mockResolvedValue(undefined);
+        const mockExitFullscreen = vi.fn().mockResolvedValue(undefined);
+        document.documentElement.requestFullscreen = mockRequestFullscreen;
+        document.exitFullscreen = mockExitFullscreen;
+        (document as any).fullscreenElement = null;
+
+        await view.enterFullscreen();
+        expect(mockStatusBar.hide).toHaveBeenCalled();
+        expect(mockStatusBar.setOverlaysWebView).toHaveBeenCalledWith({ overlay: true });
+        expect(mockRequestFullscreen).toHaveBeenCalledWith({ navigationUI: 'hide' });
+
+        (document as any).fullscreenElement = document.documentElement;
+        await view.exitFullscreen();
+        expect(mockStatusBar.show).toHaveBeenCalled();
+        expect(mockStatusBar.setOverlaysWebView).toHaveBeenCalledWith({ overlay: false });
+        expect(mockExitFullscreen).toHaveBeenCalled();
+
+        delete (window as any).Capacitor;
+        await view.onClose();
+      } finally {
+        (Platform as any).isDesktop = origDesktop;
+        (Platform as any).isMobile = origMobile;
+      }
+    });
+
+    it('only shows presenter view button in HUD when 2 or more screens are connected', async () => {
+      const leaf = createMockLeaf(app);
+      const view = new MarpPresentationView(leaf as any, mockPlugin as any);
+      await view.onOpen();
+
+      const presenterBtn = view.contentEl.querySelector('button[title*="Presenter View"]') as HTMLElement;
+      expect(presenterBtn?.style.display).toBe('none');
+
+      const originalRequire = (window as any).require;
+      (window as any).require = vi.fn().mockReturnValue({
+        screen: {
+          getAllDisplays: vi.fn().mockReturnValue([{ id: 1 }, { id: 2 }]),
+        },
+      });
+
+      view.updatePresenterButtonVisibility();
+      expect(presenterBtn?.style.display).toBe('');
+
+      (window as any).require = originalRequire;
       await view.onClose();
     });
   });
@@ -324,6 +493,21 @@ describe('MarpPresentationView and MarpPresenterView', () => {
 
       const bounds = getOtherDisplayBounds();
       expect(bounds).toBeNull();
+
+      (window as any).require = originalRequire;
+    });
+
+    it('hasMultipleScreens detects multi-display configurations', () => {
+      expect(hasMultipleScreens()).toBe(false);
+
+      const originalRequire = (window as any).require;
+      (window as any).require = vi.fn().mockReturnValue({
+        screen: {
+          getAllDisplays: vi.fn().mockReturnValue([{ id: 1 }, { id: 2 }]),
+        },
+      });
+
+      expect(hasMultipleScreens()).toBe(true);
 
       (window as any).require = originalRequire;
     });

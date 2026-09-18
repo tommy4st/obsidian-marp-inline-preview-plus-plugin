@@ -21,6 +21,7 @@ export interface MarpSettings {
   exportOpenAfter: boolean;
   exportImageQuality: ExportImageQuality;
   autoOpenPresenterView: boolean;
+  showViewHeaderButton: boolean;
   laserDecayDuration: number;
 }
 
@@ -34,6 +35,7 @@ export const DEFAULT_SETTINGS: MarpSettings = {
   exportOpenAfter: true,
   exportImageQuality: 'medium',
   autoOpenPresenterView: false,
+  showViewHeaderButton: true,
   laserDecayDuration: 1.5,
 };
 
@@ -172,6 +174,17 @@ export class MarpSettingTab extends PluginSettingTab {
         t.setValue(this.plugin.settings.autoOpenPresenterView).onChange(async (v) => {
           this.plugin.settings.autoOpenPresenterView = v;
           await this.plugin.saveSettings();
+        }),
+      );
+
+    new Setting(containerEl)
+      .setName('Show presentation button in note header')
+      .setDesc('Show a button next to the reading/editing switcher to start the presentation.')
+      .addToggle((t) =>
+        t.setValue(this.plugin.settings.showViewHeaderButton).onChange(async (v) => {
+          this.plugin.settings.showViewHeaderButton = v;
+          await this.plugin.saveSettings();
+          this.plugin.headerActions?.updateAll();
         }),
       );
 

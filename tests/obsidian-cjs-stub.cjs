@@ -40,6 +40,32 @@ class Setting {
   setDisabled() { return this; }
   onClick() { return this; }
 }
+class MenuItem {
+  constructor() {
+    this.title = '';
+    this.icon = '';
+    this.callback = null;
+  }
+  setTitle(t) { this.title = t; return this; }
+  setIcon(i) { this.icon = i; return this; }
+  onClick(cb) { this.callback = cb; return this; }
+}
+
+class Menu {
+  constructor() {
+    this.items = [];
+  }
+  addItem(cb) {
+    const item = new MenuItem();
+    cb?.(item);
+    this.items.push(item);
+    return this;
+  }
+  showAtMouseEvent() { return this; }
+  showAtPosition() { return this; }
+  hide() { return this; }
+}
+
 class MarkdownView {}
 class TFile {}
 class Modal {
@@ -138,6 +164,8 @@ module.exports = {
   Plugin,
   PluginSettingTab,
   Setting,
+  Menu,
+  MenuItem,
   MarkdownView,
   TFile,
   Modal,
