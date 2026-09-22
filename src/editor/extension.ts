@@ -9,12 +9,13 @@ import {
 import { Extension, RangeSetBuilder, StateEffect, StateField } from '@codemirror/state';
 import type { MarpEngine } from '../marp/engine';
 import type { ThemeResolver } from '../marp/themes';
-import { findSlideBreaks } from '../marp/slides';
+import { findSlideBreaks, type LineRange } from '../marp/slides';
 import { injectThemeIfMissing } from '../marp/frontmatter';
 import { SlidePlaceholder } from './widget';
 import { SlideStage, type SlideContent } from './stage';
 import { debounce } from '../util/debounce';
 import { rewriteImageSrcs, rewriteCssUrls } from '../util/images';
+import type { EditPreviewPosition } from '../settings';
 
 export type EditorDeps = {
   app: App;
@@ -22,6 +23,7 @@ export type EditorDeps = {
   themes: ThemeResolver;
   enabled: () => boolean;
   debounceMs: () => number;
+  previewPosition?: () => EditPreviewPosition;
 };
 
 /**
@@ -52,6 +54,40 @@ const slidesField = StateField.define<DecorationSet>({
   },
   provide: (f) => EditorView.decorations.from(f),
 });
+
+/**
+ * Build slide placeholder decorations according to the configured position.
+ */
+export function createSlideDecorations(
+  slidesCount: number,
+  breaks: LineRange[] & { bodyStart?: number },
+  docLength: number,
+  position: EditPreviewPosition = 'before-divider',
+): DecorationSet {
+  const builder = new RangeSetBuilder<Decoration>();
+  if (slidesCount === 0) return builder.finish();
+
+  const add = (idx: number, pos: number, side: number) =>
+    builder.add(pos, pos, Decoration.widget({ widget: new SlidePlaceholder(idx), block: true, side }));
+
+  if (position === 'top') {
+    const bodyStart = breaks.bodyStart ?? 0;
+    add(0, bodyStart, bodyStart > 0 ? 1 : -1);
+    const count = Math.min(breaks.length, slidesCount - 1);
+    for (let i = 0; i < count; i++) add(i + 1, breaks[i].to, 1);
+  } else {
+    const isBefore = position === 'before-divider';
+    const count = Math.min(breaks.length, slidesCount);
+    for (let i = 0; i < count; i++) {
+      add(i, isBefore ? breaks[i].from : breaks[i].to, isBefore ? -1 : 1);
+    }
+    if (slidesCount > breaks.length) {
+      add(slidesCount - 1, docLength, 1);
+    }
+  }
+
+  return builder.finish();
+}
 
 /**
  * Build the editor extension bundle: a StateField that holds slide
@@ -151,37 +187,14 @@ export function buildEditorExtension(deps: EditorDeps): Extension {
           // positions in the measure phase.
           this.stage.syncSlides(slides);
 
-          const builder = new RangeSetBuilder<Decoration>();
-          // Marp renders one section per slide; for a deck with N break lines
-          // we get N+1 sections. Drop a placeholder after each break, then
-          // append the last section at the end of the document.
-          const widgetCount = Math.min(breaks.length, slides.length);
-          for (let i = 0; i < widgetCount; i++) {
-            builder.add(
-              breaks[i].to,
-              breaks[i].to,
-              Decoration.widget({
-                widget: new SlidePlaceholder(i),
-                block: true,
-                side: 1,
-              }),
-            );
-          }
-          if (slides.length > breaks.length) {
-            const lastIdx = slides.length - 1;
-            const docLength = this.view.state.doc.length;
-            builder.add(
-              docLength,
-              docLength,
-              Decoration.widget({
-                widget: new SlidePlaceholder(lastIdx),
-                block: true,
-                side: 1,
-              }),
-            );
-          }
-
-          this.push(builder.finish());
+          this.push(
+            createSlideDecorations(
+              slides.length,
+              breaks,
+              this.view.state.doc.length,
+              deps.previewPosition?.() ?? 'before-divider',
+            ),
+          );
           this.stage.scheduleReposition();
         } catch (e) {
           console.error('[marp-inline-preview] edit-mode render failed', e);

@@ -5,12 +5,13 @@
 // delimiters at the top of the document.
 
 export type LineRange = { from: number; to: number; lineNumber: number };
+export type SlideBreaks = LineRange[] & { bodyStart?: number };
 
 const FENCE_RE = /^(```+|~~~+)/;
 const BREAK_RE = /^-{3,}\s*$/;
 
-export function findSlideBreaks(source: string): LineRange[] {
-  const breaks: LineRange[] = [];
+export function findSlideBreaks(source: string): SlideBreaks {
+  const breaks: SlideBreaks = [];
   let offset = 0;
   let inFence = false;
   let fenceMarker: string | null = null;
@@ -20,8 +21,7 @@ export function findSlideBreaks(source: string): LineRange[] {
   let sawNonEmptyBeforeFm = false;
 
   const lines = source.split('\n');
-  for (const raw of lines) {
-    const line = raw;
+  for (const line of lines) {
     const start = offset;
     const end = offset + line.length;
     const trimmed = line.replace(/\r$/, '');
@@ -48,23 +48,19 @@ export function findSlideBreaks(source: string): LineRange[] {
         } else if (!sawNonEmptyBeforeFm && BREAK_RE.test(trimmed)) {
           frontmatterOpen = true;
           sawNonEmptyBeforeFm = true;
-          // skip this `---` (frontmatter open) — not a slide break
           offset = end + 1;
           lineNumber++;
           continue;
         } else {
           sawNonEmptyBeforeFm = true;
-          // there is no frontmatter
           frontmatterClosed = true;
         }
-      } else {
-        if (BREAK_RE.test(trimmed)) {
-          // frontmatter close — not a slide break either
-          frontmatterClosed = true;
-          offset = end + 1;
-          lineNumber++;
-          continue;
-        }
+      } else if (BREAK_RE.test(trimmed)) {
+        frontmatterClosed = true;
+        breaks.bodyStart = end;
+        offset = end + 1;
+        lineNumber++;
+        continue;
       }
     }
 

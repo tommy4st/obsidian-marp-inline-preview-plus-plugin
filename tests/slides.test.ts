@@ -68,4 +68,19 @@ describe('findSlideBreaks', () => {
     const breaks = findSlideBreaks(src);
     expect(breaks).toHaveLength(3);
   });
+
+  it('tracks bodyStart at frontmatter close when frontmatter is present', () => {
+    const src = '---\nmarp: true\n---\n\nslide 1\n---\nslide 2';
+    const breaks = findSlideBreaks(src);
+    expect(breaks.bodyStart).toBe(18);
+    expect(src.slice(0, breaks.bodyStart)).toBe('---\nmarp: true\n---');
+    expect(breaks).toHaveLength(1);
+  });
+
+  it('leaves bodyStart undefined when frontmatter is absent', () => {
+    const src = 'slide 1\n---\nslide 2';
+    const breaks = findSlideBreaks(src);
+    expect(breaks.bodyStart).toBeUndefined();
+    expect(breaks).toHaveLength(1);
+  });
 });

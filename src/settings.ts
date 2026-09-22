@@ -10,8 +10,14 @@ export type EditPreviewMaxWidth =
   | 'full'
   | 'custom';
 
+export type EditPreviewPosition =
+  | 'before-divider'
+  | 'after-divider'
+  | 'top';
+
 export interface MarpSettings {
   editPreview: boolean;
+  editPreviewPosition: EditPreviewPosition;
   editPreviewMaxWidth: EditPreviewMaxWidth;
   customEditPreviewWidth: string;
   limitEditPreviewWidth?: boolean;
@@ -27,6 +33,7 @@ export interface MarpSettings {
 
 export const DEFAULT_SETTINGS: MarpSettings = {
   editPreview: true,
+  editPreviewPosition: 'before-divider',
   editPreviewMaxWidth: 'editor',
   customEditPreviewWidth: '800px',
   readingPreview: true,
@@ -58,12 +65,28 @@ export class MarpSettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('Inline preview in edit mode')
-      .setDesc('Show each slide rendered below its --- separator in the editor.')
+      .setDesc('Show slide previews directly in the editor.')
       .addToggle((t) =>
         t.setValue(this.plugin.settings.editPreview).onChange(async (v) => {
           this.plugin.settings.editPreview = v;
           await this.plugin.saveSettings();
         }),
+      );
+
+    new Setting(containerEl)
+      .setName('Preview slide position')
+      .setDesc('Where to position slide previews relative to slide content and dividers in edit mode.')
+      .addDropdown((d) =>
+        d
+          .addOption('before-divider', 'Before divider (bottom of slide)')
+          .addOption('after-divider', 'After divider (below divider line)')
+          .addOption('top', 'Top of slide (above slide content)')
+          .setValue(this.plugin.settings.editPreviewPosition)
+          .onChange(async (v: EditPreviewPosition) => {
+            this.plugin.settings.editPreviewPosition = v;
+            await this.plugin.saveSettings();
+            this.plugin.refreshActiveEditors();
+          }),
       );
 
     new Setting(containerEl)
@@ -205,4 +228,3 @@ export class MarpSettingTab extends PluginSettingTab {
       );
   }
 }
-

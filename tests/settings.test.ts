@@ -100,7 +100,7 @@ describe('Settings — editPreviewMaxWidth', () => {
     expect(plugin.refreshActiveEditors).toHaveBeenCalled();
 
     // Enter custom width
-    const textInput = customSettingEl.querySelector('input[type="text"]') as HTMLInputElement;
+    const textInput = customSettingEl.querySelector('input[type=\"text\"]') as HTMLInputElement;
     expect(textInput).toBeDefined();
     textInput.value = '950px';
     textInput.dispatchEvent(new Event('input'));
@@ -118,6 +118,37 @@ describe('Settings — editPreviewMaxWidth', () => {
     expect(plugin.settings.editPreviewMaxWidth).toBe('800px');
     expect(customSettingEl.style.display).toBe('none');
     expect(document.body.style.getPropertyValue('--marp-edit-preview-max-width')).toBe('800px');
+  });
+});
+
+describe('Settings — editPreviewPosition', () => {
+  it('defaults to "before-divider" and updates when changing dropdown', async () => {
+    expect(DEFAULT_SETTINGS.editPreviewPosition).toBe('before-divider');
+
+    const plugin: any = {
+      settings: { ...DEFAULT_SETTINGS },
+      saveSettings: vi.fn().mockResolvedValue(undefined),
+      refreshActiveEditors: vi.fn(),
+    };
+    const container = document.createElement('div');
+    const tab = new MarpSettingTab({} as any, plugin);
+    (tab as any).containerEl = container;
+    tab.display();
+
+    const item = Array.from(container.querySelectorAll('.setting-item')).find((el) =>
+      el.textContent?.includes('Preview slide position'),
+    );
+    expect(item).toBeDefined();
+    const select = item?.querySelector('select') as HTMLSelectElement;
+    expect(select.value).toBe('before-divider');
+
+    select.value = 'top';
+    select.dispatchEvent(new Event('change'));
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(plugin.settings.editPreviewPosition).toBe('top');
+    expect(plugin.saveSettings).toHaveBeenCalled();
+    expect(plugin.refreshActiveEditors).toHaveBeenCalled();
   });
 });
 

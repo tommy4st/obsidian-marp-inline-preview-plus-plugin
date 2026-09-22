@@ -43,6 +43,7 @@ export default class MarpInlinePreviewPlugin extends Plugin {
         themes: this.themes,
         enabled: () => this.settings.editPreview,
         debounceMs: () => DEBOUNCE_MS,
+        previewPosition: () => this.settings.editPreviewPosition,
       }),
     );
 
