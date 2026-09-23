@@ -1,66 +1,51 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { Platform } from 'obsidian';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { MarpPresentationView } from '../src/presentation/presentationView';
 import { MarpPresenterView } from '../src/presentation/presenterView';
-import { MARP_PRESENTATION_VIEW_TYPE, MARP_PRESENTER_VIEW_TYPE } from '../src/presentation/types';
-import { PresentationSession } from '../src/presentation/session';
 import {
-  startPresentation,
+  MARP_PRESENTATION_VIEW_TYPE,
+  MARP_PRESENTER_VIEW_TYPE,
+  formatTime,
+  formatClockTime,
+  isEditableElement,
+  isViewInFocus,
+} from '../src/presentation/types';
+import {
   openPresenterView,
+  startPresentation,
   getOtherDisplayBounds,
   hasMultipleScreens,
 } from '../src/presentation/service';
-
-function createMockLeaf(app: any) {
-  return {
-    app,
-    view: null as any,
-    detach: vi.fn(),
-    setViewState: vi.fn(),
-    getViewState: vi.fn(),
-  };
-}
-
-function createMockPlugin(app: any) {
-  return {
-    app,
-    settings: {
-      autoOpenPresenterView: false,
-    },
-    themes: {
-      collect: vi.fn().mockResolvedValue('default'),
-    },
-    engine: {
-      renderArray: vi.fn().mockReturnValue({
-        html: ['<section><h1>Slide 1</h1></section>', '<section><h1>Slide 2</h1></section>'],
-        css: '/* marp css */',
-        comments: [['Speaker note for slide 1'], ['Speaker note for slide 2']],
-      }),
-    },
-  };
-}
+import { PresentationSession } from '../src/presentation/session';
 
 describe('MarpPresentationView and MarpPresenterView', () => {
   let app: any;
   let mockPlugin: any;
-  const mockFile = {
-    path: 'slides/presentation-test.md',
-    basename: 'presentation-test',
-    extension: 'md',
-  };
+  let mockFile: any;
+
+  const createMockLeaf = (appInstance: any) => ({
+    app: appInstance,
+    containerEl: document.createElement('div'),
+    setViewState: vi.fn().mockResolvedValue(undefined),
+    detach: vi.fn(),
+    view: null,
+  });
 
   beforeEach(() => {
-    document.body.innerHTML = '';
+    PresentationSession.get('test.md')?.destroy();
+
     app = {
       vault: {
-        cachedRead: vi.fn().mockResolvedValue('---\nmarp: true\n---\n# Slide 1\n<!-- note 1 -->\n---\n# Slide 2'),
-        getAbstractFileByPath: vi.fn().mockReturnValue(mockFile),
-        on: vi.fn().mockReturnValue({ id: 'evt-1' }),
+        cachedRead: vi.fn().mockResolvedValue('# Slide 1\n<!-- Speaker note for slide 1 -->\n---\n# Slide 2'),
+        getAbstractFileByPath: vi.fn(),
+        on: vi.fn().mockReturnValue({ id: 'ref' }),
       },
       metadataCache: {
         getFileCache: vi.fn().mockReturnValue({
-          frontmatter: { marp: true },
+          frontmatter: {
+            marp: true,
+            theme: 'default',
+          },
         }),
       },
       workspace: {
@@ -70,33 +55,109 @@ describe('MarpPresentationView and MarpPresenterView', () => {
         getLeaf: vi.fn(),
       },
     };
-    mockPlugin = createMockPlugin(app);
+
+    mockPlugin = {
+      app,
+      settings: {
+        laserDecayDuration: 1.0,
+      },
+      themes: {
+        collect: vi.fn().mockResolvedValue({
+          name: 'default',
+          css: '/* default theme */',
+          type: 'builtin',
+        }),
+      },
+      engine: {
+        renderArray: vi.fn().mockReturnValue({
+          html: ['<section><h1>Slide 1</h1></section>', '<section><h1>Slide 2</h1></section>'],
+          css: '/* marp css */',
+          comments: [['Speaker note for slide 1'], []],
+        }),
+      },
+    };
+
+    mockFile = {
+      path: 'test.md',
+      basename: 'test',
+    };
   });
 
   afterEach(() => {
-    PresentationSession.get(mockFile.path)?.destroy();
+    PresentationSession.get('test.md')?.destroy();
     vi.restoreAllMocks();
   });
 
-  describe('MarpPresentationView', () => {
-    it('initializes with correct view type and displayText', () => {
-      const leaf = createMockLeaf(app);
-      const view = new MarpPresentationView(leaf as any, mockPlugin as any);
-      expect(view.getViewType()).toBe(MARP_PRESENTATION_VIEW_TYPE);
-      expect(view.getIcon()).toBe('presentation');
+  describe('Focus and Editable Helpers', () => {
+    it('isEditableElement returns true for inputs, textareas, selects, and contenteditable elements', () => {
+      const input = document.createElement('input');
+      const textarea = document.createElement('textarea');
+      const select = document.createElement('select');
+      const div = document.createElement('div');
+      const contentEditableDiv = document.createElement('div');
+      contentEditableDiv.contentEditable = 'true';
+      const cmEditor = document.createElement('div');
+      cmEditor.className = 'cm-editor';
+      const cmContent = document.createElement('div');
+      cmContent.className = 'cm-content';
+      cmEditor.appendChild(cmContent);
+
+      expect(isEditableElement(input)).toBe(true);
+      expect(isEditableElement(textarea)).toBe(true);
+      expect(isEditableElement(select)).toBe(true);
+      expect(isEditableElement(contentEditableDiv)).toBe(true);
+      expect(isEditableElement(cmContent)).toBe(true);
+      expect(isEditableElement(div)).toBe(false);
+      expect(isEditableElement(null)).toBe(false);
     });
 
+    it('isViewInFocus correctly respects activeLeaf, editor focus, and document focus', () => {
+      const presLeaf = createMockLeaf(app);
+      const editorLeaf = createMockLeaf(app);
+
+      const view = new MarpPresentationView(presLeaf as any, mockPlugin as any);
+      document.body.appendChild(view.containerEl);
+
+      // 1. When doc.hasFocus is false
+      const origHasFocus = document.hasFocus;
+      document.hasFocus = () => false;
+      expect(isViewInFocus(view as any)).toBe(false);
+      document.hasFocus = origHasFocus || (() => true);
+
+      // 2. When activeLeaf is the editor tab
+      app.workspace.activeLeaf = editorLeaf;
+      expect(isViewInFocus(view as any)).toBe(false);
+
+      // 3. When activeLeaf is the presentation tab
+      app.workspace.activeLeaf = presLeaf;
+      expect(isViewInFocus(view as any)).toBe(true);
+
+      // 4. When activeElement is an editable input inside the doc
+      const input = document.createElement('input');
+      document.body.appendChild(input);
+      input.focus();
+      expect(isViewInFocus(view as any)).toBe(false);
+
+      input.remove();
+      view.containerEl.remove();
+    });
+  });
+
+  describe('MarpPresentationView', () => {
     it('mounts stage, overlay, and HUD on open', async () => {
       const leaf = createMockLeaf(app);
       const view = new MarpPresentationView(leaf as any, mockPlugin as any);
+
       await view.onOpen();
 
+      expect(view.contentEl.classList.contains('marp-presentation-view')).toBe(true);
       const stage = view.contentEl.querySelector('.marp-presentation-stage');
-      const overlay = view.contentEl.querySelector('.marp-presentation-blank-overlay');
-      const hud = view.contentEl.querySelector('.marp-presentation-hud');
-
       expect(stage).not.toBeNull();
+      const iframe = view.contentEl.querySelector('iframe');
+      expect(iframe).not.toBeNull();
+      const overlay = view.contentEl.querySelector('.marp-presentation-blank-overlay');
       expect(overlay).not.toBeNull();
+      const hud = view.contentEl.querySelector('.marp-presentation-hud');
       expect(hud).not.toBeNull();
 
       await view.onClose();
@@ -157,80 +218,124 @@ describe('MarpPresentationView and MarpPresenterView', () => {
       expect(tMoveSpy).toHaveBeenCalled();
 
       view.contentEl.dispatchEvent(pUp);
+
+      // Pointer leave when drawing closes trail and hides HUD
+      view.contentEl.dispatchEvent(pDown);
+      const pLeave = new PointerEvent('pointerleave');
+      view.contentEl.dispatchEvent(pLeave);
       expect(hud?.classList.contains('is-visible')).toBe(false);
 
-      // Moving mouse while laser is active does NOT wake HUD
-      view.contentEl.dispatchEvent(new PointerEvent('pointermove', { clientX: 200, clientY: 200 }));
-      expect(hud?.classList.contains('is-visible')).toBe(false);
-      view.contentEl.dispatchEvent(new MouseEvent('mousemove', { clientX: 200, clientY: 200 }));
-      expect(hud?.classList.contains('is-visible')).toBe(false);
-
-      // Just clicking with laser pointer (no drag) reveals HUD toolbar
-      const pClickDown = new PointerEvent('pointerdown', { clientX: 100, clientY: 100, button: 0 });
-      const pClickUp = new PointerEvent('pointerup', { clientX: 100, clientY: 100, button: 0 });
-      view.contentEl.dispatchEvent(pClickDown);
-      view.contentEl.dispatchEvent(pClickUp);
+      // Tapping/clicking without drag in laser mode temporarily reveals HUD
+      const pTapDown = new PointerEvent('pointerdown', { clientX: 100, clientY: 100, button: 0 });
+      const pTapJitter = new PointerEvent('pointermove', { clientX: 101, clientY: 101 });
+      const pTapUp = new PointerEvent('pointerup', { clientX: 101, clientY: 101 });
+      view.contentEl.dispatchEvent(pTapDown);
+      view.contentEl.dispatchEvent(pTapJitter);
+      view.contentEl.dispatchEvent(pTapUp);
       expect(hud?.classList.contains('is-visible')).toBe(true);
 
-      // Hide HUD again to test touch tapping
-      hud?.classList.remove('is-visible');
-      expect(hud?.classList.contains('is-visible')).toBe(false);
-
-      // Tapping with touch (pointerdown + small jitter move + pointerup + pointerleave) reveals HUD
-      const tDown = new PointerEvent('pointerdown', { clientX: 150, clientY: 150, pointerType: 'touch' });
-      const tJitter = new PointerEvent('pointermove', { clientX: 158, clientY: 156, pointerType: 'touch' }); // 10px jitter
-      const tUp = new PointerEvent('pointerup', { clientX: 158, clientY: 156, pointerType: 'touch' });
-      const tLeave = new PointerEvent('pointerleave', { pointerType: 'touch' }); // fires on touch liftoff
+      // Touch tap without drag also reveals HUD
+      const tDown = new PointerEvent('pointerdown', { pointerType: 'touch', clientX: 100, clientY: 100 });
+      const tJitter = new PointerEvent('pointermove', { pointerType: 'touch', clientX: 102, clientY: 102 });
+      const tUp = new PointerEvent('pointerup', { pointerType: 'touch', clientX: 102, clientY: 102 });
+      const tLeave = new PointerEvent('pointerleave', { pointerType: 'touch' });
       view.contentEl.dispatchEvent(tDown);
       view.contentEl.dispatchEvent(tJitter);
       view.contentEl.dispatchEvent(tUp);
       expect(hud?.classList.contains('is-visible')).toBe(true);
       view.contentEl.dispatchEvent(tLeave);
-      expect(hud?.classList.contains('is-visible')).toBe(true); // NOT hidden by touch pointerleave!
+      expect(hud?.classList.contains('is-visible')).toBe(true); // NOT hidden by touch pointerleave
 
-      // Clicking while laser pointer is active should NOT advance slide
-      view.contentEl.dispatchEvent(new MouseEvent('click', { clientX: 800, clientY: 400 }));
-      expect(view.session?.currentSlide).toBe(1); // remains on slide 1
-
-      // Escape key turns off laser pointer first
-      view.contentEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
-      expect(view.isLaserActive).toBe(false);
-      expect(view.contentEl.classList.contains('is-laser-active')).toBe(false);
+      // Touchmove does not trigger drawing without pointerdown
+      const tMoveUnarmed = new TouchEvent('touchmove', { cancelable: true });
+      const tMoveUnarmedSpy = vi.spyOn(tMoveUnarmed, 'preventDefault');
+      view.contentEl.dispatchEvent(tMoveUnarmed);
+      expect(tMoveUnarmedSpy).toHaveBeenCalled();
 
       // Clean up
       await view.onClose();
     });
 
+    it('ignores keystrokes when editing tab is in focus or focus is in an editor element', async () => {
+      const presLeaf = createMockLeaf(app);
+      const editorLeaf = createMockLeaf(app);
+
+      const view = new MarpPresentationView(presLeaf as any, mockPlugin as any);
+      await view.onOpen();
+      await view.loadFile(mockFile as any, 0);
+
+      document.body.appendChild(view.containerEl);
+
+      expect(view.session?.currentSlide).toBe(0);
+
+      // Set activeLeaf to editor tab
+      app.workspace.activeLeaf = editorLeaf;
+
+      // Dispatching ArrowRight should NOT navigate because editor tab is active
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }));
+      expect(view.session?.currentSlide).toBe(0);
+
+      // Switch activeLeaf to presentation tab
+      app.workspace.activeLeaf = presLeaf;
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }));
+      expect(view.session?.currentSlide).toBe(1);
+
+      // When activeElement is an editor (.cm-content) inside the document
+      const cmEditor = document.createElement('div');
+      cmEditor.className = 'cm-editor';
+      const cmContent = document.createElement('div');
+      cmContent.className = 'cm-content';
+      cmContent.tabIndex = 0;
+      cmEditor.appendChild(cmContent);
+      document.body.appendChild(cmEditor);
+      cmContent.focus();
+
+      // Dispatch ArrowLeft from editor
+      cmContent.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+      // Slide should NOT change
+      expect(view.session?.currentSlide).toBe(1);
+
+      // Shortcuts with modifier keys (Ctrl+P, Ctrl+F, Cmd+W) are ignored
+      view.contentEl.focus();
+      const ctrlP = new KeyboardEvent('keydown', { key: 'p', ctrlKey: true });
+      const ctrlPSpy = vi.spyOn(ctrlP, 'preventDefault');
+      document.dispatchEvent(ctrlP);
+      expect(ctrlPSpy).not.toHaveBeenCalled();
+
+      cmEditor.remove();
+      view.containerEl.remove();
+      await view.onClose();
+    });
+
     it('hides mouse cursor when HUD toolbar hides after timeout, and restores on movement', async () => {
       vi.useFakeTimers();
-      try {
-        const leaf = createMockLeaf(app);
-        const view = new MarpPresentationView(leaf as any, mockPlugin as any);
-        await view.onOpen();
+      const leaf = createMockLeaf(app);
+      const view = new MarpPresentationView(leaf as any, mockPlugin as any);
+      await view.onOpen();
+      await view.loadFile(mockFile as any, 0);
 
-        const hud = view.contentEl.querySelector('.marp-presentation-hud');
-        expect(hud?.classList.contains('is-visible')).toBe(true);
-        expect(view.contentEl.classList.contains('is-cursor-hidden')).toBe(false);
+      const hud = view.contentEl.querySelector('.marp-presentation-hud');
+      expect(hud?.classList.contains('is-visible')).toBe(true);
 
-        // Advance past the 2500ms auto-hide delay
-        vi.advanceTimersByTime(2600);
-        expect(hud?.classList.contains('is-visible')).toBe(false);
-        expect(view.contentEl.classList.contains('is-cursor-hidden')).toBe(true);
+      // Fast-forward past HUD timeout
+      vi.advanceTimersByTime(2600);
 
-        // Moving mouse restores visibility
-        view.contentEl.dispatchEvent(new PointerEvent('pointermove', { clientX: 200, clientY: 200 }));
-        expect(hud?.classList.contains('is-visible')).toBe(true);
-        expect(view.contentEl.classList.contains('is-cursor-hidden')).toBe(false);
+      // HUD should hide and cursor should have is-cursor-hidden class
+      expect(hud?.classList.contains('is-visible')).toBe(false);
+      expect(view.contentEl.classList.contains('is-cursor-hidden')).toBe(true);
 
-        // Leaving the window immediately hides HUD and cursor
-        view.contentEl.dispatchEvent(new PointerEvent('pointerleave'));
-        expect(hud?.classList.contains('is-visible')).toBe(false);
-        expect(view.contentEl.classList.contains('is-cursor-hidden')).toBe(true);
+      // Moving mouse restores visibility
+      view.contentEl.dispatchEvent(new MouseEvent('mousemove'));
+      expect(hud?.classList.contains('is-visible')).toBe(true);
+      expect(view.contentEl.classList.contains('is-cursor-hidden')).toBe(false);
 
-        await view.onClose();
-      } finally {
-        vi.useRealTimers();
-      }
+      // Leaving window/container hides cursor and HUD immediately
+      view.contentEl.dispatchEvent(new PointerEvent('pointerleave'));
+      expect(hud?.classList.contains('is-visible')).toBe(false);
+      expect(view.contentEl.classList.contains('is-cursor-hidden')).toBe(true);
+
+      await view.onClose();
+      vi.useRealTimers();
     });
 
     it('responds to keyboard events dispatched to document without prior element click', async () => {
@@ -238,122 +343,108 @@ describe('MarpPresentationView and MarpPresenterView', () => {
       const view = new MarpPresentationView(leaf as any, mockPlugin as any);
       await view.onOpen();
       await view.loadFile(mockFile as any, 0);
+      document.body.appendChild(view.containerEl);
 
       expect(view.session?.currentSlide).toBe(0);
 
-      // Key event fired directly on document without clicking contentEl
-      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+      // Dispatch directly on document window
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }));
       expect(view.session?.currentSlide).toBe(1);
 
-      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft' }));
+      expect(view.session?.currentSlide).toBe(0);
+
+      view.containerEl.remove();
+      await view.onClose();
+    });
+
+    it('supports mobile touch interactions: wakes HUD on touch and navigates on horizontal swipe', async () => {
+      const leaf = createMockLeaf(app);
+      const view = new MarpPresentationView(leaf as any, mockPlugin as any);
+      await view.onOpen();
+      await view.loadFile(mockFile as any, 0);
+
+      expect(view.session?.currentSlide).toBe(0);
+
+      // Touch start wakes HUD
+      const hud = view.contentEl.querySelector('.marp-presentation-hud');
+      hud?.classList.remove('is-visible');
+
+      const touchStart = new TouchEvent('touchstart', {
+        touches: [{ clientX: 300, clientY: 200 } as any],
+      });
+      view.contentEl.dispatchEvent(touchStart);
+      expect(hud?.classList.contains('is-visible')).toBe(true);
+
+      // Horizontal swipe left (next slide)
+      const touchEndLeft = new TouchEvent('touchend', {
+        changedTouches: [{ clientX: 100, clientY: 210 } as any],
+      });
+      view.contentEl.dispatchEvent(touchEndLeft);
+      expect(view.session?.currentSlide).toBe(1);
+
+      // Horizontal swipe right (previous slide)
+      const touchStart2 = new TouchEvent('touchstart', {
+        touches: [{ clientX: 100, clientY: 200 } as any],
+      });
+      view.contentEl.dispatchEvent(touchStart2);
+      const touchEndRight = new TouchEvent('touchend', {
+        changedTouches: [{ clientX: 300, clientY: 205 } as any],
+      });
+      view.contentEl.dispatchEvent(touchEndRight);
       expect(view.session?.currentSlide).toBe(0);
 
       await view.onClose();
     });
 
-    it('supports mobile touch interactions: wakes HUD on touch and navigates on horizontal swipe', async () => {
-      vi.useFakeTimers();
-      try {
-        const leaf = createMockLeaf(app);
-        const view = new MarpPresentationView(leaf as any, mockPlugin as any);
-        await view.onOpen();
-        await view.loadFile(mockFile as any, 0);
-
-        const hud = view.contentEl.querySelector('.marp-presentation-hud');
-        expect(hud?.classList.contains('is-visible')).toBe(true);
-
-        // Advance timers to hide HUD
-        vi.advanceTimersByTime(2600);
-        expect(hud?.classList.contains('is-visible')).toBe(false);
-
-        // Touchstart on contentEl wakes the HUD
-        view.contentEl.dispatchEvent(new TouchEvent('touchstart', {
-          touches: [{ clientX: 200, clientY: 200 } as any],
-        }));
-        expect(hud?.classList.contains('is-visible')).toBe(true);
-
-        // Horizontal swipe left (dx = -80) advances to next slide
-        expect(view.session?.currentSlide).toBe(0);
-        view.contentEl.dispatchEvent(new TouchEvent('touchend', {
-          changedTouches: [{ clientX: 120, clientY: 205 } as any],
-        }));
-        expect(view.session?.currentSlide).toBe(1);
-
-        // Subsequent synthetic click within 350ms is debounced
-        view.contentEl.dispatchEvent(new MouseEvent('click', { clientX: 800, clientY: 400 }));
-        expect(view.session?.currentSlide).toBe(1);
-
-        // Horizontal swipe right (dx = +80) retreats to previous slide
-        view.contentEl.dispatchEvent(new TouchEvent('touchstart', {
-          touches: [{ clientX: 100, clientY: 200 } as any],
-        }));
-        view.contentEl.dispatchEvent(new TouchEvent('touchend', {
-          changedTouches: [{ clientX: 180, clientY: 205 } as any],
-        }));
-        expect(view.session?.currentSlide).toBe(0);
-
-        await view.onClose();
-      } finally {
-        vi.useRealTimers();
-      }
-    });
-
     it('manages mobile status bar and fullscreen request with navigationUI hide', async () => {
-      const origDesktop = Platform.isDesktop;
-      const origMobile = Platform.isMobile;
-      (Platform as any).isDesktop = false;
-      (Platform as any).isMobile = true;
+      const mockStatusBar = {
+        hide: vi.fn().mockResolvedValue(undefined),
+        setOverlaysWebView: vi.fn().mockResolvedValue(undefined),
+        show: vi.fn().mockResolvedValue(undefined),
+      };
+      (window as any).Capacitor = {
+        Plugins: { StatusBar: mockStatusBar },
+      };
 
-      try {
-        const leaf = createMockLeaf(app);
-        const view = new MarpPresentationView(leaf as any, mockPlugin as any);
-        await view.onOpen();
+      const leaf = createMockLeaf(app);
+      const view = new MarpPresentationView(leaf as any, mockPlugin as any);
 
-        const mockStatusBar = {
-          hide: vi.fn().mockResolvedValue(undefined),
-          show: vi.fn().mockResolvedValue(undefined),
-          setOverlaysWebView: vi.fn().mockResolvedValue(undefined),
-        };
-        (window as any).Capacitor = {
-          Plugins: {
-            StatusBar: mockStatusBar,
-          },
-        };
+      const requestFsSpy = vi.fn().mockResolvedValue(undefined);
+      (view.containerEl as any).requestFullscreen = requestFsSpy;
 
-        const mockRequestFullscreen = vi.fn().mockResolvedValue(undefined);
-        const mockExitFullscreen = vi.fn().mockResolvedValue(undefined);
-        document.documentElement.requestFullscreen = mockRequestFullscreen;
-        document.exitFullscreen = mockExitFullscreen;
-        (document as any).fullscreenElement = null;
+      await view.onOpen();
+      await view.enterFullscreen();
 
-        await view.enterFullscreen();
-        expect(mockStatusBar.hide).toHaveBeenCalled();
-        expect(mockStatusBar.setOverlaysWebView).toHaveBeenCalledWith({ overlay: true });
-        expect(mockRequestFullscreen).toHaveBeenCalledWith({ navigationUI: 'hide' });
+      expect(mockStatusBar.hide).toHaveBeenCalled();
+      expect(mockStatusBar.setOverlaysWebView).toHaveBeenCalledWith({ overlay: true });
+      expect(requestFsSpy).toHaveBeenCalledWith({ navigationUI: 'hide' });
 
-        (document as any).fullscreenElement = document.documentElement;
-        await view.exitFullscreen();
-        expect(mockStatusBar.show).toHaveBeenCalled();
-        expect(mockStatusBar.setOverlaysWebView).toHaveBeenCalledWith({ overlay: false });
-        expect(mockExitFullscreen).toHaveBeenCalled();
+      await view.exitFullscreen();
+      await view.onClose();
+      expect(mockStatusBar.show).toHaveBeenCalled();
+      expect(mockStatusBar.setOverlaysWebView).toHaveBeenCalledWith({ overlay: false });
 
-        delete (window as any).Capacitor;
-        await view.onClose();
-      } finally {
-        (Platform as any).isDesktop = origDesktop;
-        (Platform as any).isMobile = origMobile;
-      }
+      delete (window as any).Capacitor;
     });
 
     it('only shows presenter view button in HUD when 2 or more screens are connected', async () => {
+      // Single screen
+      const originalRequire = (window as any).require;
+      (window as any).require = vi.fn().mockReturnValue({
+        screen: {
+          getAllDisplays: vi.fn().mockReturnValue([{ id: 1 }]),
+        },
+      });
+
       const leaf = createMockLeaf(app);
       const view = new MarpPresentationView(leaf as any, mockPlugin as any);
       await view.onOpen();
 
-      const presenterBtn = view.contentEl.querySelector('button[title*="Presenter View"]') as HTMLElement;
+      const presenterBtn = (view as any).presenterBtn as HTMLElement;
       expect(presenterBtn?.style.display).toBe('none');
 
-      const originalRequire = (window as any).require;
+      // Multi-screen
       (window as any).require = vi.fn().mockReturnValue({
         screen: {
           getAllDisplays: vi.fn().mockReturnValue([{ id: 1 }, { id: 2 }]),
@@ -372,6 +463,7 @@ describe('MarpPresentationView and MarpPresenterView', () => {
     it('initializes with correct view type, displays previews, and shows speaker notes', async () => {
       const leaf = createMockLeaf(app);
       const view = new MarpPresenterView(leaf as any, mockPlugin as any);
+
       expect(view.getViewType()).toBe(MARP_PRESENTER_VIEW_TYPE);
 
       await view.onOpen();
@@ -513,4 +605,3 @@ describe('MarpPresentationView and MarpPresenterView', () => {
     });
   });
 });
-

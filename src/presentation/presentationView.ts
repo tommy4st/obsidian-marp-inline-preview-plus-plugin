@@ -7,6 +7,8 @@ import {
   SlideDeckData,
   createIconButton,
   createSlideIframe,
+  isEditableElement,
+  isViewInFocus,
   loadSlideDeck,
   safePaintFrame,
 } from './types';
@@ -545,11 +547,16 @@ export class MarpPresentationView extends ItemView {
     this.hudCounterEl.textContent = `Slide ${this.session.currentSlide + 1} / ${this.session.totalSlides}`;
   }
 
+  public isViewInFocus(): boolean {
+    return isViewInFocus(this);
+  }
+
   private setupKeyboardNavigation(container: HTMLElement): void {
     const doc = container.ownerDocument || document;
 
     const handleKeydown = (e: KeyboardEvent) => {
-      if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) return;
+      if (isEditableElement(e.target as Element)) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
 
       switch (e.key) {
         case 'ArrowRight':
@@ -614,11 +621,8 @@ export class MarpPresentationView extends ItemView {
 
     const onKey = (e: KeyboardEvent) => {
       if (!this.session) return;
-      if (!this.isPopout() && this.app.workspace.activeLeaf && this.app.workspace.activeLeaf !== this.leaf) {
-        if (!this.containerEl.contains(doc.activeElement)) {
-          return;
-        }
-      }
+      if (isEditableElement(e.target as Element)) return;
+      if (!this.isViewInFocus()) return;
       if ((e as any)._marpHandled) return;
       (e as any)._marpHandled = true;
       handleKeydown(e);

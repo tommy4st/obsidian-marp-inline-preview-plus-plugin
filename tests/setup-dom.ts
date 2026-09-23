@@ -27,6 +27,7 @@ const g = globalThis as unknown as {
     opts?: CreateElOptions,
   ) => HTMLElementTagNameMap[K];
   createDiv?: (opts?: CreateElOptions) => HTMLDivElement;
+  createSpan?: (opts?: CreateElOptions) => HTMLSpanElement;
 };
 
 g.createEl = function createEl(tag, opts) {
@@ -37,6 +38,10 @@ g.createEl = function createEl(tag, opts) {
 
 g.createDiv = function createDiv(opts) {
   return g.createEl!('div', opts);
+};
+
+g.createSpan = function createSpan(opts) {
+  return g.createEl!('span', opts);
 };
 
 if (typeof Element !== 'undefined') {
@@ -73,6 +78,11 @@ if (typeof Element !== 'undefined') {
       return this.createEl('div', opts);
     };
   }
+  if (!proto.createSpan) {
+    proto.createSpan = function (opts: any) {
+      return this.createEl('span', opts);
+    };
+  }
   if (!proto.setText) {
     proto.setText = function (val: string) {
       this.textContent = val;
@@ -101,5 +111,3 @@ if (typeof HTMLCanvasElement !== 'undefined') {
     return orig?.call(this, type, ...args);
   };
 }
-
-

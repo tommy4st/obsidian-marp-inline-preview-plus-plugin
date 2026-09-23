@@ -10,6 +10,8 @@ import {
   createSlideIframe,
   formatClockTime,
   formatTime,
+  isEditableElement,
+  isViewInFocus,
   loadSlideDeck,
   safePaintFrame,
 } from './types';
@@ -375,9 +377,21 @@ export class MarpPresenterView extends ItemView {
     this.clockInterval = setInterval(update, 1000);
   }
 
+  public isPopout(): boolean {
+    const doc = this.containerEl.ownerDocument;
+    return doc !== undefined && doc !== document;
+  }
+
+  public isViewInFocus(): boolean {
+    return isViewInFocus(this);
+  }
+
   private setupKeyboardNavigation(container: HTMLElement): void {
+    const doc = container.ownerDocument || document;
+
     const handleKeydown = (e: KeyboardEvent) => {
-      if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement)?.tagName)) return;
+      if (isEditableElement(e.target as Element)) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
 
       switch (e.key) {
         case 'ArrowRight':
@@ -417,8 +431,22 @@ export class MarpPresenterView extends ItemView {
       }
     };
 
-    container.addEventListener('keydown', handleKeydown);
-    this.unsubs.push(() => container.removeEventListener('keydown', handleKeydown));
+    const onKey = (e: KeyboardEvent) => {
+      if (!this.session) return;
+      if (isEditableElement(e.target as Element)) return;
+      if (!this.isViewInFocus()) return;
+      if ((e as any)._marpHandled) return;
+      (e as any)._marpHandled = true;
+      handleKeydown(e);
+    };
+
+    doc.addEventListener('keydown', onKey);
+    container.addEventListener('keydown', onKey);
+
+    this.unsubs.push(() => {
+      doc.removeEventListener('keydown', onKey);
+      container.removeEventListener('keydown', onKey);
+    });
   }
 
   private applyPreviewScaling(): void {

@@ -1,4 +1,4 @@
-import { TFile, setIcon } from 'obsidian';
+import { ItemView, TFile, setIcon } from 'obsidian';
 import type MarpInlinePreviewPlugin from '../main';
 import { injectThemeIfMissing } from '../marp/frontmatter';
 import { rewriteCssUrls, rewriteImageSrcs } from '../util/images';
@@ -95,3 +95,83 @@ export function formatClockTime(d = new Date()): string {
   return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
 }
 
+/**
+ * Check if an element is an editable input, textarea, contenteditable, or CodeMirror editor.
+ */
+export function isEditableElement(el: Element | null | undefined): boolean {
+  if (!el) return false;
+  const tag = el.tagName?.toUpperCase();
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+  if ((el as HTMLElement).isContentEditable) return true;
+  if (typeof el.closest === 'function') {
+    if (el.closest('input, textarea, select, [contenteditable="true"], .cm-content, .cm-editor, .markdown-source-view')) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Determine if a presentation or presenter view tab/window is currently in focus.
+ */
+export function isViewInFocus(view: {
+  app: any;
+  leaf: any;
+  containerEl: HTMLElement;
+  contentEl?: HTMLElement;
+  isPopout?: () => boolean;
+}): boolean {
+  const doc = view.containerEl?.ownerDocument || document;
+
+  // 1. Check window focus
+  if (typeof doc.hasFocus === 'function' && !doc.hasFocus()) {
+    return false;
+  }
+
+  // 2. If the active element in the document is editable, do not capture
+  if (isEditableElement(doc.activeElement)) {
+    return false;
+  }
+
+  // 3. If focus is directly on or inside this view's container, it is in focus
+  if (
+    view.containerEl &&
+    (view.containerEl.contains(doc.activeElement) ||
+      doc.activeElement === view.containerEl ||
+      (view.contentEl && doc.activeElement === view.contentEl))
+  ) {
+    return true;
+  }
+
+  // 4. Popout window scenario
+  const isPopout = typeof view.isPopout === 'function' ? view.isPopout() : doc !== document;
+  if (isPopout) {
+    if (view.containerEl && view.containerEl.offsetParent === null && !view.containerEl.classList?.contains('mod-active')) {
+      return false;
+    }
+    const activeLeaf = (view.app?.workspace as any)?.activeLeaf ?? (view.app?.workspace as any)?.getActiveLeaf?.();
+    if (activeLeaf && view.leaf && activeLeaf !== view.leaf) {
+      return false;
+    }
+    return true;
+  }
+
+  // 5. Main window / tab scenario:
+  const activeLeaf = (view.app?.workspace as any)?.activeLeaf ?? (view.app?.workspace as any)?.getActiveLeaf?.();
+  if (activeLeaf && view.leaf) {
+    return activeLeaf === view.leaf;
+  }
+
+  // Fallback: check mod-active CSS class on the leaf container
+  const leafEl = view.containerEl?.closest?.('.workspace-leaf') || view.leaf?.containerEl;
+  if (leafEl?.classList?.contains('mod-active')) {
+    return true;
+  }
+
+  // If no activeLeaf or mod-active is found (e.g. minimal test environment), fallback to true
+  if (!activeLeaf && !leafEl?.classList?.contains('mod-active')) {
+    return true;
+  }
+
+  return false;
+}
