@@ -57,7 +57,6 @@ export class MarpPresentationView extends ItemView {
   private touchStartY = 0;
   private lastTouchSwipeTime = 0;
   private isExiting = false;
-  private hasEnteredFullscreen = false;
 
   constructor(leaf: WorkspaceLeaf, private plugin: MarpInlinePreviewPlugin) {
     super(leaf);
@@ -128,19 +127,6 @@ export class MarpPresentationView extends ItemView {
       }
     });
     this.registerEvent(fileModifyRef);
-
-    // Presentation view is always fullscreen.
-    // If fullscreen is exited (e.g. by pressing Esc or OS action), exit the presentation view.
-    const doc = contentEl.ownerDocument || document;
-    const onFullscreenChange = () => {
-      if (doc.fullscreenElement) {
-        this.hasEnteredFullscreen = true;
-      } else if (this.hasEnteredFullscreen && !this.isExiting) {
-        void this.exitPresentation();
-      }
-    };
-    doc.addEventListener("fullscreenchange", onFullscreenChange);
-    this.unsubs.push(() => doc.removeEventListener("fullscreenchange", onFullscreenChange));
 
     void this.enterFullscreen();
 
@@ -441,20 +427,32 @@ export class MarpPresentationView extends ItemView {
   public async enterFullscreen(retries = Platform.isDesktop ? 6 : 0): Promise<boolean> {
     try {
       await hideMobileStatusBar();
+      const win = (this.containerEl.ownerDocument?.defaultView || window) as any;
       const doc = this.containerEl.ownerDocument || document;
-      if (doc.fullscreenElement) {
-        this.hasEnteredFullscreen = true;
+
+      // In Obsidian desktop, electronWindow.setFullScreen provides guaranteed native window fullscreen
+      if (win?.electronWindow && typeof win.electronWindow.setFullScreen === "function") {
+        if (!win.electronWindow.isFullScreen?.()) {
+          win.electronWindow.setFullScreen(true);
+        }
         return true;
       }
+
+      if (doc.fullscreenElement || (doc as any).webkitFullscreenElement) {
+        return true;
+      }
+
       const target = (Platform.isDesktop ? this.containerEl : (doc.documentElement || this.containerEl)) as HTMLElement;
       if (typeof target?.requestFullscreen === "function") {
         await target.requestFullscreen({ navigationUI: "hide" } as any);
-        this.hasEnteredFullscreen = true;
+        return true;
+      }
+      if (typeof (target as any)?.webkitRequestFullscreen === "function") {
+        await (target as any).webkitRequestFullscreen();
         return true;
       }
       if (typeof this.containerEl?.requestFullscreen === "function") {
         await this.containerEl.requestFullscreen();
-        this.hasEnteredFullscreen = true;
         return true;
       }
     } catch {
@@ -470,9 +468,15 @@ export class MarpPresentationView extends ItemView {
   public async exitFullscreen(): Promise<void> {
     try {
       await showMobileStatusBar();
+      const win = (this.containerEl.ownerDocument?.defaultView || window) as any;
+      if (win?.electronWindow && typeof win.electronWindow.isFullScreen === "function" && win.electronWindow.isFullScreen()) {
+        win.electronWindow.setFullScreen(false);
+      }
       const doc = this.containerEl.ownerDocument || document;
       if (doc.fullscreenElement) {
         await doc.exitFullscreen();
+      } else if (typeof (doc as any)?.webkitExitFullscreen === "function") {
+        await (doc as any).webkitExitFullscreen();
       }
     } catch {}
   }
@@ -481,7 +485,14 @@ export class MarpPresentationView extends ItemView {
     if (this.isExiting) return;
     this.isExiting = true;
     await this.exitFullscreen();
+    const win = this.containerEl.ownerDocument?.defaultView as any;
+    const isPopout = this.isPopout();
     this.leaf.detach();
+    if (isPopout && win && win !== window && !win.closed && typeof win.close === "function") {
+      try {
+        win.close();
+      } catch {}
+    }
   }
 
   private cleanup(): void {
