@@ -58,9 +58,7 @@ describe('MarpPresentationView and MarpPresenterView', () => {
 
     mockPlugin = {
       app,
-      settings: {
-        laserDecayDuration: 1.0,
-      },
+      settings: {},
       themes: {
         collect: vi.fn().mockResolvedValue({
           name: 'default',
@@ -187,70 +185,10 @@ describe('MarpPresentationView and MarpPresenterView', () => {
       const overlay = view.contentEl.querySelector('.marp-presentation-blank-overlay');
       expect(overlay?.classList.contains('is-blackout')).toBe(true);
 
-      // Test laser canvas exists
-      const laserCanvas = view.contentEl.querySelector('canvas.marp-laser-canvas');
-      expect(laserCanvas).not.toBeNull();
-
-      // Test laser pointer toggle via 'l' key
-      expect(view.isLaserActive).toBe(false);
-      view.contentEl.dispatchEvent(new KeyboardEvent('keydown', { key: 'l' }));
-      expect(view.isLaserActive).toBe(true);
-      expect(view.contentEl.classList.contains('is-laser-active')).toBe(true);
-
-      // Dragging with laser pointer creates trails, hides HUD, and blocks sidebar swipe
+      // HUD visibility on mouse movement
       const hud = view.contentEl.querySelector('.marp-presentation-hud');
-      const pDown = new PointerEvent('pointerdown', { clientX: 100, clientY: 100, button: 0 });
-      const pMove = new PointerEvent('pointermove', { clientX: 120, clientY: 120 });
-      const pUp = new PointerEvent('pointerup', { clientX: 120, clientY: 120 });
-      const tMove = new TouchEvent('touchmove', { cancelable: true });
-      const pDownSpy = vi.spyOn(pDown, 'preventDefault');
-      const pMoveSpy = vi.spyOn(pMove, 'preventDefault');
-      const tMoveSpy = vi.spyOn(tMove, 'preventDefault');
-
-      view.contentEl.dispatchEvent(pDown);
-      expect(pDownSpy).toHaveBeenCalled();
-
-      view.contentEl.dispatchEvent(pMove);
-      expect(pMoveSpy).toHaveBeenCalled();
-      expect(hud?.classList.contains('is-visible')).toBe(false);
-
-      view.contentEl.dispatchEvent(tMove);
-      expect(tMoveSpy).toHaveBeenCalled();
-
-      view.contentEl.dispatchEvent(pUp);
-
-      // Pointer leave when drawing closes trail and hides HUD
-      view.contentEl.dispatchEvent(pDown);
-      const pLeave = new PointerEvent('pointerleave');
-      view.contentEl.dispatchEvent(pLeave);
-      expect(hud?.classList.contains('is-visible')).toBe(false);
-
-      // Tapping/clicking without drag in laser mode temporarily reveals HUD
-      const pTapDown = new PointerEvent('pointerdown', { clientX: 100, clientY: 100, button: 0 });
-      const pTapJitter = new PointerEvent('pointermove', { clientX: 101, clientY: 101 });
-      const pTapUp = new PointerEvent('pointerup', { clientX: 101, clientY: 101 });
-      view.contentEl.dispatchEvent(pTapDown);
-      view.contentEl.dispatchEvent(pTapJitter);
-      view.contentEl.dispatchEvent(pTapUp);
+      view.contentEl.dispatchEvent(new MouseEvent('mousemove'));
       expect(hud?.classList.contains('is-visible')).toBe(true);
-
-      // Touch tap without drag also reveals HUD
-      const tDown = new PointerEvent('pointerdown', { pointerType: 'touch', clientX: 100, clientY: 100 });
-      const tJitter = new PointerEvent('pointermove', { pointerType: 'touch', clientX: 102, clientY: 102 });
-      const tUp = new PointerEvent('pointerup', { pointerType: 'touch', clientX: 102, clientY: 102 });
-      const tLeave = new PointerEvent('pointerleave', { pointerType: 'touch' });
-      view.contentEl.dispatchEvent(tDown);
-      view.contentEl.dispatchEvent(tJitter);
-      view.contentEl.dispatchEvent(tUp);
-      expect(hud?.classList.contains('is-visible')).toBe(true);
-      view.contentEl.dispatchEvent(tLeave);
-      expect(hud?.classList.contains('is-visible')).toBe(true); // NOT hidden by touch pointerleave
-
-      // Touchmove does not trigger drawing without pointerdown
-      const tMoveUnarmed = new TouchEvent('touchmove', { cancelable: true });
-      const tMoveUnarmedSpy = vi.spyOn(tMoveUnarmed, 'preventDefault');
-      view.contentEl.dispatchEvent(tMoveUnarmed);
-      expect(tMoveUnarmedSpy).toHaveBeenCalled();
 
       // Clean up
       await view.onClose();

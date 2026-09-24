@@ -12,14 +12,14 @@ Only files whose YAML frontmatter contains `marp: true` are touched. Everything 
 ## Features
 
 - **Marp Core 4 under the hood** — same renderer as the official Marp tooling, in pure JavaScript so it works on Obsidian Mobile (iOS & Android).
-- **Presentation & Presenter Views** — dual-screen audience presentation with auto-scaling, keyboard/touch navigation, screen blanking, an Excalidraw-style streamlined laser pointer with adjustable decay duration, and a dedicated speaker dashboard (timer, clock, upcoming slide preview, markdown notes, two-way sync).
+- **Presentation & Presenter Views** — dual-screen audience presentation with auto-scaling, keyboard/touch navigation, screen blanking, and a dedicated speaker dashboard (timer, clock, upcoming slide preview, markdown notes, two-way sync).
 - **Zero-external-dependency PDF export on desktop** — exports vector PDFs with slide dimensions, optional presenter note annotations, and configurable image DPI downsampling presets without requiring Chrome or external CLI tools.
 - **Customizable edit preview width** — configure the maximum width of inline slide widgets (match editor line width, 800px, 1000px, full width 100%, or custom CSS dimensions).
 - **Vault images & background support** — vault-relative paths in Markdown images (`![](...)`), Marp background images (`![bg](...)`), and custom stylesheet URLs are automatically rewritten to Obsidian resource URLs.
 - **Custom theme support** through `.marprc.yml` (vault-root, with a fallback to the slide file's folder), plus the standard frontmatter `theme:` directive.
 - **Bundled KaTeX math** — no network roundtrips, no broken formulae offline.
 - **Encapsulated styles** — Marp's per-slide CSS is mounted inside Shadow DOM, so it can't leak into Obsidian's own UI.
-- **Pluggable settings** — configure edit/reading previews, preview width, math rendering, PDF export options, presentation defaults, and laser pointer decay duration from Settings.
+- **Pluggable settings** — configure edit/reading previews, preview width, math rendering, PDF export options, and presentation defaults from Settings.
 
 ## Quick start
 
@@ -101,8 +101,7 @@ Present your slide deck directly within Obsidian or across dual monitors with a 
 - **Audience Presentation View**:
   - Automatically launches in fullscreen (on the second screen when dual displays are detected, leaving your main Obsidian window free).
   - Maintains 16:9 aspect ratio with auto-scaling and letterboxing.
-  - **Laser pointer tool**: press `L` or click the laser icon in the HUD to toggle a streamlined laser pointer (adapted from Excalidraw's laser algorithm). Click and drag to draw smooth glowing trails with dynamic pressure response that fade over time. The decay duration can be customized in Settings.
-  - Auto-hiding HUD toolbar with slide progress, laser pointer toggle, and navigation buttons.
+  - Auto-hiding HUD toolbar with slide progress and navigation buttons.
   - Keyboard navigation: `Space` / `ArrowRight` / `PageDown` to advance; `ArrowLeft` / `PageUp` to go back; `Home` / `End` for first/last slide.
   - Screen blanking: press `B` or `.` for blackout, `W` for whiteout.
   - Fullscreen toggle with `F`.
@@ -135,7 +134,6 @@ Present your slide deck directly within Obsidian or across dual monitors with a 
 
 ### Presentation
 - **Auto-open presenter view** — automatically open the Presenter View in an Obsidian tab when starting a presentation (Desktop only).
-- **Laser pointer decay duration** — duration in seconds that laser pointer strokes remain visible before fading (default: `1.5` seconds).
 
 ### Commands
 - `Marp: Refresh Marp previews` — forces a full reload of previews and custom themes.
@@ -264,7 +262,6 @@ src/
 │   ├── session.ts       Bidirectional state synchronization & event bus
 │   ├── presentationView.ts Fullscreen audience display view & HUD
 │   ├── presenterView.ts Speaker dashboard (notes, timer, upcoming slide)
-│   ├── laserPointer.ts  Streamlined laser pointer math & stroke outline generator
 │   └── types.ts         Presentation state & view interfaces
 ├── marp/
 │   ├── engine.ts        Marp Core wrapper (themes, render helpers, comments)

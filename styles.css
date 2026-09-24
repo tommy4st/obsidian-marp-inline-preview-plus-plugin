@@ -273,51 +273,10 @@ body:has(.workspace-leaf.mod-active .marp-presentation-view) .workspace-leaf-con
   background: rgba(255, 255, 255, 0.2);
 }
 
-.marp-presentation-hud-btn.is-active {
-  color: #ff4444;
-  background: rgba(255, 68, 68, 0.25);
-}
-
-.marp-laser-canvas {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  z-index: 25;
-  display: none;
-  touch-action: none;
-}
-
-.marp-presentation-view.is-laser-active,
-.marp-presentation-view.is-laser-active .marp-presentation-stage,
-.marp-presentation-view.is-laser-active .marp-presentation-slide-wrapper,
-.marp-presentation-view.is-laser-active .marp-laser-canvas {
-  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cdefs%3E%3CradialGradient id='g' cx='50%25' cy='50%25' r='50%25'%3E%3Cstop offset='0%25' stop-color='%23ff3333' stop-opacity='1'/%3E%3Cstop offset='40%25' stop-color='%23ff1111' stop-opacity='0.9'/%3E%3Cstop offset='70%25' stop-color='%23ff0000' stop-opacity='0.4'/%3E%3Cstop offset='100%25' stop-color='%23ff0000' stop-opacity='0'/%3E%3C/radialGradient%3E%3C/defs%3E%3Ccircle cx='12' cy='12' r='10' fill='url(%23g)'/%3E%3Ccircle cx='12' cy='12' r='3.5' fill='%23ff2222'/%3E%3Ccircle cx='12' cy='12' r='1.5' fill='%23ffffff' opacity='0.9'/%3E%3C/svg%3E") 12 12, crosshair !important;
-}
-
-.marp-presentation-view.is-laser-active .marp-laser-canvas {
-  display: block;
-}
-
-.marp-presentation-view.is-laser-active .marp-presentation-hud,
-.marp-presentation-view.is-laser-active .marp-presentation-hud * {
-  cursor: default !important;
-}
-
-.marp-presentation-view.is-laser-active .marp-presentation-hud-btn {
-  cursor: pointer !important;
-}
-
 .marp-presentation-view.is-cursor-hidden,
-.marp-presentation-view.is-cursor-hidden *,
-.marp-presentation-view.is-laser-active.is-cursor-hidden,
-.marp-presentation-view.is-laser-active.is-cursor-hidden * {
+.marp-presentation-view.is-cursor-hidden * {
   cursor: none !important;
 }
-
-
 
 /*
  * Presenter View (Speaker Dashboard)
@@ -427,7 +386,6 @@ body:has(.workspace-leaf.mod-active .marp-presentation-view) .workspace-leaf-con
   flex: 1;
   min-height: 0;
 }
-
 
 .marp-presenter-card-title {
   font-size: 11px;
@@ -572,4 +530,3 @@ body:has(.workspace-leaf.mod-active .marp-presentation-view) .workspace-leaf-con
   justify-content: center;
   cursor: pointer;
 }
-
