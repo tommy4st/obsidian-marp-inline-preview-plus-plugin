@@ -429,31 +429,39 @@ describe('MarpPresentationView and MarpPresenterView', () => {
       document.hasFocus = origHasFocus;
     });
 
-    it('exiting fullscreen triggers presentation view exit', async () => {
+    it('exitPresentation detaches the leaf and is idempotent', async () => {
       const leaf = createMockLeaf(app);
       const view = new MarpPresentationView(leaf as any, mockPlugin as any);
       await view.onOpen();
       await view.loadFile(mockFile as any, 0);
 
-      // Simulate entering fullscreen first
-      Object.defineProperty(document, 'fullscreenElement', {
-        value: view.containerEl,
-        configurable: true,
-        writable: true,
-      });
-      document.dispatchEvent(new Event('fullscreenchange'));
+      await view.exitPresentation();
+      await view.exitPresentation();
 
-      // Simulate exiting fullscreen (e.g. via browser Esc key or OS)
-      Object.defineProperty(document, 'fullscreenElement', {
-        value: null,
+      expect(leaf.detach).toHaveBeenCalledTimes(1);
+
+      await view.onClose();
+    });
+
+    it('exitPresentation closes the popout window after detaching the leaf', async () => {
+      const leaf = createMockLeaf(app);
+      const view = new MarpPresentationView(leaf as any, mockPlugin as any);
+      await view.onOpen();
+      await view.loadFile(mockFile as any, 0);
+
+      const fakeWin = { closed: false, close: vi.fn() };
+      Object.defineProperty(view.containerEl, 'ownerDocument', {
+        value: { defaultView: fakeWin },
         configurable: true,
-        writable: true,
       });
-      document.dispatchEvent(new Event('fullscreenchange'));
-      await new Promise((r) => setTimeout(r, 10));
+      vi.spyOn(view, 'isPopout').mockReturnValue(true);
+
+      await view.exitPresentation();
 
       expect(leaf.detach).toHaveBeenCalled();
+      expect(fakeWin.close).toHaveBeenCalled();
 
+      Object.defineProperty(view.containerEl, 'ownerDocument', { value: document, configurable: true });
       await view.onClose();
     });
   });

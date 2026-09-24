@@ -13,46 +13,36 @@ import {
   isViewInFocus,
   safePaintFrame,
 } from "./types";
-import { openPresenterView, hasMultipleScreens, observeScreenChanges } from "./service";
+import { hasMultipleScreens, observeScreenChanges, openPresenterView } from "./service";
 
-export async function setMobileStatusBar(visible: boolean): Promise<void> {
+const HUD_AUTOHIDE_MS = 2500;
+const END_OF_DECK_HTML = '<div class="marp-inline-preview"><section><h1>End of Deck</h1></section></div>';
+
+/** Toggle the Capacitor status bar so fullscreen is truly edge-to-edge on mobile. */
+async function setMobileStatusBar(visible: boolean): Promise<void> {
   try {
-    const win = (typeof window !== "undefined" ? window : globalThis) as any;
-    const cap = win?.Capacitor;
-    const statusBar = cap?.Plugins?.StatusBar ?? win?.StatusBar;
-    if (statusBar) {
-      if (visible) {
-        if (typeof statusBar.show === "function") await statusBar.show();
-        if (typeof statusBar.setOverlaysWebView === "function") await statusBar.setOverlaysWebView({ overlay: false });
-      } else {
-        if (typeof statusBar.hide === "function") await statusBar.hide();
-        if (typeof statusBar.setOverlaysWebView === "function") await statusBar.setOverlaysWebView({ overlay: true });
-      }
-    }
+    const bar = (globalThis as any).Capacitor?.Plugins?.StatusBar;
+    if (!bar) return;
+    await (visible ? bar.show() : bar.hide());
+    await bar.setOverlaysWebView?.({ overlay: !visible });
   } catch (err) {
     console.debug(`[marp-presentation] setMobileStatusBar(${visible}) error:`, err);
   }
 }
-
-export const hideMobileStatusBar = () => setMobileStatusBar(false);
-export const showMobileStatusBar = () => setMobileStatusBar(true);
 
 export class MarpPresentationView extends ItemView {
   public file: TFile | null = null;
   public session: PresentationSession | null = null;
   private deck: SlideDeckData | null = null;
 
-  private stageEl!: HTMLElement;
   private slideWrapperEl!: HTMLElement;
   private iframe!: HTMLIFrameElement;
   private blankOverlayEl!: HTMLElement;
   private hudEl!: HTMLElement;
   private hudCounterEl!: HTMLElement;
   private presenterBtn: HTMLElement | null = null;
-  private hudHideTimeout: any = null;
-
+  private hudHideTimeout?: ReturnType<typeof setTimeout>;
   private unsubs: Array<() => void> = [];
-  private resizeObserver: ResizeObserver | null = null;
   private touchStartX = 0;
   private touchStartY = 0;
   private lastTouchSwipeTime = 0;
@@ -82,13 +72,10 @@ export class MarpPresentationView extends ItemView {
     };
   }
 
-  async setState(state: any, _result: any): Promise<void> {
-    if (state?.filePath) {
-      const abstractFile = this.app.vault.getAbstractFileByPath(state.filePath);
-      if (abstractFile instanceof TFile) {
-        await this.loadFile(abstractFile, state.slideIndex ?? 0);
-      }
-    }
+  async setState(state: any): Promise<void> {
+    if (!state?.filePath) return;
+    const file = this.app.vault.getAbstractFileByPath(state.filePath);
+    if (file instanceof TFile) await this.loadFile(file, state.slideIndex ?? 0);
   }
 
   async onOpen(): Promise<void> {
@@ -97,49 +84,36 @@ export class MarpPresentationView extends ItemView {
     contentEl.addClass("marp-presentation-view");
     contentEl.tabIndex = 0;
 
-    // Slide Stage & Wrapper
-    this.stageEl = contentEl.createDiv({ cls: "marp-presentation-stage" });
-    this.slideWrapperEl = this.stageEl.createDiv({ cls: "marp-presentation-slide-wrapper" });
+    const stageEl = contentEl.createDiv({ cls: "marp-presentation-stage" });
+    this.slideWrapperEl = stageEl.createDiv({ cls: "marp-presentation-slide-wrapper" });
     this.slideWrapperEl.style.width = `${SLIDE_W}px`;
     this.slideWrapperEl.style.height = `${SLIDE_H}px`;
-
     this.iframe = createSlideIframe();
     this.slideWrapperEl.appendChild(this.iframe);
 
-    // Overlays
     this.blankOverlayEl = contentEl.createDiv({ cls: "marp-presentation-blank-overlay" });
 
-    // Controls & Listeners
-    this.buildHud(contentEl);
-    this.setupKeyboardNavigation(contentEl);
-    this.setupClickNavigation(contentEl);
-    this.setupTouchNavigation(contentEl);
-    this.setupAutoScaling(contentEl);
+    this.buildHud();
+    this.setupKeyboardNavigation();
+    this.setupClickNavigation();
+    this.setupTouchNavigation();
+    this.setupAutoScaling();
 
     if (this.deck) {
       this.renderCurrentSlide();
       this.updateHud();
     }
 
-    const fileModifyRef = this.app.vault.on("modify", async (modifiedFile) => {
-      if (this.file && modifiedFile.path === this.file.path) {
-        await this.reloadDeck();
-      }
-    });
-    this.registerEvent(fileModifyRef);
+    this.registerEvent(
+      this.app.vault.on("modify", (file) => {
+        if (file.path === this.file?.path) void this.reloadDeck();
+      }),
+    );
 
     void this.enterFullscreen();
-
-    const focusView = () => {
-      try {
-        const d = contentEl.ownerDocument || document;
-        d.defaultView?.focus();
-        contentEl.focus();
-      } catch {}
-    };
-    focusView();
-    setTimeout(focusView, 50);
-    setTimeout(focusView, 150);
+    this.focusContent();
+    setTimeout(() => this.focusContent(), 50);
+    setTimeout(() => this.focusContent(), 150);
   }
 
   async onClose(): Promise<void> {
@@ -153,9 +127,81 @@ export class MarpPresentationView extends ItemView {
     await this.reloadDeck(initialSlideIndex);
   }
 
+  public isPopout(): boolean {
+    return this.containerEl.ownerDocument !== document;
+  }
+
+  public updatePresenterButtonVisibility(): void {
+    if (!this.presenterBtn) return;
+    this.presenterBtn.style.display = hasMultipleScreens(this.viewWindow) ? "" : "none";
+  }
+
+  public async enterFullscreen(retries = Platform.isDesktop ? 6 : 0): Promise<boolean> {
+    try {
+      await setMobileStatusBar(false);
+      const win = this.viewWindow as any;
+
+      // Desktop Obsidian: Electron's native window fullscreen is the most reliable.
+      if (typeof win.electronWindow?.setFullScreen === "function") {
+        if (!win.electronWindow.isFullScreen?.()) win.electronWindow.setFullScreen(true);
+        return true;
+      }
+
+      const doc = this.containerEl.ownerDocument || document;
+      if (doc.fullscreenElement) return true;
+
+      const target = Platform.isDesktop ? this.containerEl : doc.documentElement;
+      if (typeof target.requestFullscreen !== "function") return false;
+      await target.requestFullscreen({ navigationUI: "hide" });
+      return true;
+    } catch {
+      // requestFullscreen can reject transiently (e.g. missing user gesture) — retry briefly.
+      if (retries > 0) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        return this.enterFullscreen(retries - 1);
+      }
+      return false;
+    }
+  }
+
+  public async exitFullscreen(): Promise<void> {
+    try {
+      await setMobileStatusBar(true);
+      const win = this.viewWindow as any;
+      if (win.electronWindow?.isFullScreen?.()) win.electronWindow.setFullScreen(false);
+      const doc = this.containerEl.ownerDocument || document;
+      if (doc.fullscreenElement) await doc.exitFullscreen();
+    } catch {}
+  }
+
+  public async exitPresentation(): Promise<void> {
+    if (this.isExiting) return;
+    this.isExiting = true;
+    await this.exitFullscreen();
+    const win = this.containerEl.ownerDocument?.defaultView;
+    this.leaf.detach();
+    if (this.isPopout() && win && win !== window && !win.closed) (win as any).close?.();
+  }
+
+  private get viewWindow(): Window {
+    return (this.contentEl?.ownerDocument?.defaultView || window) as Window;
+  }
+
+  /** Add a listener and push its remover onto `unsubs` for cleanup. */
+  private listen(target: EventTarget, type: string, handler: EventListener, options?: AddEventListenerOptions): void {
+    target.addEventListener(type, handler, options);
+    this.unsubs.push(() => target.removeEventListener(type, handler, options));
+  }
+
+  private focusContent(): void {
+    try {
+      (this.contentEl.ownerDocument.defaultView || window).focus();
+      this.contentEl.focus();
+    } catch {}
+  }
+
   private async reloadDeck(initialSlideIndex?: number): Promise<void> {
     if (!this.file) return;
-
     try {
       const { deck, session } = await initializeDeckSession(
         this.plugin,
@@ -166,7 +212,6 @@ export class MarpPresentationView extends ItemView {
       );
       this.deck = deck;
       this.session = session;
-
       this.renderCurrentSlide();
       this.updateHud();
     } catch (err) {
@@ -174,27 +219,21 @@ export class MarpPresentationView extends ItemView {
     }
   }
 
-  private attachSessionListeners(session = this.session): void {
-    if (!session) return;
+  private attachSessionListeners(session: PresentationSession): void {
     this.session = session;
-
     this.unsubs.push(
       session.on("slide-change", () => {
         this.renderCurrentSlide();
         this.updateHud();
       }),
       session.on("blank-change", (blank) => this.updateBlankOverlay(blank)),
-      session.on("destroy", () => {
-        this.session = null;
-      }),
+      session.on("destroy", () => (this.session = null)),
     );
   }
 
   private renderCurrentSlide(): void {
     if (!this.deck || !this.session) return;
-    const slideHtml =
-      this.deck.slides[this.session.currentSlide] ??
-      "<div class=\"marp-inline-preview\"><section><h1>End of Deck</h1></section></div>";
+    const slideHtml = this.deck.slides[this.session.currentSlide] ?? END_OF_DECK_HTML;
     safePaintFrame(this.iframe, slideHtml, this.deck.css);
   }
 
@@ -203,88 +242,54 @@ export class MarpPresentationView extends ItemView {
     this.blankOverlayEl.toggleClass("is-whiteout", blank === "white");
   }
 
-  private buildHud(container: HTMLElement): void {
+  private buildHud(): void {
+    const container = this.contentEl;
     this.hudEl = container.createDiv({ cls: "marp-presentation-hud" });
-    this.hudCounterEl = this.hudEl.createDiv({
-      cls: "marp-presentation-hud-counter",
-      text: "Slide 1 / 1",
-    });
+    this.hudCounterEl = this.hudEl.createDiv({ cls: "marp-presentation-hud-counter", text: "Slide 1 / 1" });
 
-    createIconButton(this.hudEl, "marp-presentation-hud-btn", "chevron-left", "Previous Slide (Left Arrow)", (e) => {
-      e.stopPropagation();
-      this.session?.prev();
-    });
+    const navBtn = (icon: string, title: string, onClick: () => void) =>
+      createIconButton(this.hudEl, "marp-presentation-hud-btn", icon, title, (e) => {
+        e.stopPropagation();
+        onClick();
+      });
 
-    createIconButton(this.hudEl, "marp-presentation-hud-btn", "chevron-right", "Next Slide (Right Arrow / Space)", (e) => {
-      e.stopPropagation();
-      this.session?.next();
-    });
-
-    this.presenterBtn = createIconButton(this.hudEl, "marp-presentation-hud-btn", "presentation", "Open Presenter View (P)", (e) => {
-      e.stopPropagation();
-      if (this.file) {
-        void openPresenterView(this.app, this.plugin, this.file, {
-          slideIndex: this.session?.currentSlide ?? 0,
-        });
-      }
-    });
+    navBtn("chevron-left", "Previous Slide (Left Arrow)", () => this.session?.prev());
+    navBtn("chevron-right", "Next Slide (Right Arrow / Space)", () => this.session?.next());
+    this.presenterBtn = navBtn("presentation", "Open Presenter View (P)", () => this.openPresenter());
     this.updatePresenterButtonVisibility();
-    this.unsubs.push(
-      observeScreenChanges(
-        () => this.updatePresenterButtonVisibility(),
-        container.ownerDocument?.defaultView || window,
-      ),
-    );
+    this.unsubs.push(observeScreenChanges(() => this.updatePresenterButtonVisibility(), this.viewWindow));
+    navBtn("x", "Exit Presentation (Esc)", () => void this.exitPresentation());
 
-    createIconButton(this.hudEl, "marp-presentation-hud-btn", "x", "Exit Presentation (Esc)", (e) => {
-      e.stopPropagation();
-      void this.exitPresentation();
-    });
-
-    const onMouseMove = () => {
-      this.showHudTemporarily();
-    };
-    const onPointerLeave = (e: PointerEvent) => {
-      if (e?.pointerType !== "touch") {
-        this.hudEl?.removeClass("is-visible");
+    this.listen(container, "mousemove", () => this.showHudTemporarily());
+    this.listen(container, "pointerleave", (e: PointerEvent) => {
+      if (e.pointerType !== "touch") {
+        this.hudEl.removeClass("is-visible");
         this.contentEl.addClass("is-cursor-hidden");
       }
-    };
-    container.addEventListener("mousemove", onMouseMove);
-    container.addEventListener("pointerleave", onPointerLeave);
-    this.unsubs.push(() => {
-      container.removeEventListener("mousemove", onMouseMove);
-      container.removeEventListener("pointerleave", onPointerLeave);
     });
     this.showHudTemporarily();
   }
 
-  public updatePresenterButtonVisibility(): void {
-    if (!this.presenterBtn) return;
-    this.presenterBtn.style.display = hasMultipleScreens(this.contentEl?.ownerDocument?.defaultView || window) ? "" : "none";
+  private openPresenter(): void {
+    if (!this.file) return;
+    void openPresenterView(this.app, this.plugin, this.file, {
+      slideIndex: this.session?.currentSlide ?? 0,
+    });
   }
 
   private showHudTemporarily(): void {
-    if (!this.hudEl) return;
     this.updatePresenterButtonVisibility();
     this.hudEl.addClass("is-visible");
     this.contentEl.removeClass("is-cursor-hidden");
-    if (this.hudHideTimeout) clearTimeout(this.hudHideTimeout);
+    clearTimeout(this.hudHideTimeout);
     this.hudHideTimeout = setTimeout(() => {
       try {
-        if (this.hudEl?.matches(":hover")) {
-          this.showHudTemporarily();
-          return;
-        }
+        // Stay visible while the pointer rests on the HUD.
+        if (this.hudEl.matches(":hover")) return this.showHudTemporarily();
       } catch {}
       this.hudEl.removeClass("is-visible");
       this.contentEl.addClass("is-cursor-hidden");
-    }, 2500);
-  }
-
-  private hideHud(): void {
-    if (this.hudHideTimeout) clearTimeout(this.hudHideTimeout);
-    this.hudEl?.removeClass("is-visible");
+    }, HUD_AUTOHIDE_MS);
   }
 
   private updateHud(): void {
@@ -292,213 +297,109 @@ export class MarpPresentationView extends ItemView {
     this.hudCounterEl.textContent = `Slide ${this.session.currentSlide + 1} / ${this.session.totalSlides}`;
   }
 
-  public isViewInFocus(): boolean {
+  private isViewInFocus(): boolean {
     return isViewInFocus(this);
   }
 
-  private setupKeyboardNavigation(container: HTMLElement): void {
-    const doc = container.ownerDocument || document;
+  private setupKeyboardNavigation(): void {
+    const onKey = (e: KeyboardEvent) => {
+      if (!this.session || (e as any)._marpHandled || !this.isViewInFocus()) return;
+      if (isEditableElement(e.target as Element) || e.ctrlKey || e.metaKey || e.altKey) return;
+      (e as any)._marpHandled = true;
 
-    const handleKeydown = (e: KeyboardEvent) => {
-      if (isEditableElement(e.target as Element)) return;
-      if (e.ctrlKey || e.metaKey || e.altKey) return;
       if (handleBasePresentationKey(e, this.session)) return;
-
-      switch (e.key) {
-        case "p":
-        case "P":
-          e.preventDefault();
-          if (this.file && hasMultipleScreens(this.contentEl?.ownerDocument?.defaultView || window)) {
-            void openPresenterView(this.app, this.plugin, this.file, {
-              slideIndex: this.session?.currentSlide ?? 0,
-            });
-          }
-          break;
-        case "Escape":
-          e.preventDefault();
-          void this.exitPresentation();
-          break;
+      if (e.key === "p" || e.key === "P") {
+        e.preventDefault();
+        if (hasMultipleScreens(this.viewWindow)) this.openPresenter();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        void this.exitPresentation();
       }
     };
 
-    const onKey = (e: KeyboardEvent) => {
-      if (!this.session) return;
-      if (isEditableElement(e.target as Element)) return;
-      if (!this.isViewInFocus()) return;
-      if ((e as any)._marpHandled) return;
-      (e as any)._marpHandled = true;
-      handleKeydown(e);
-    };
-
-    doc.addEventListener("keydown", onKey);
-    container.addEventListener("keydown", onKey);
-
-    this.unsubs.push(() => {
-      doc.removeEventListener("keydown", onKey);
-      container.removeEventListener("keydown", onKey);
-    });
+    // Container listener catches non-bubbling dispatches; document listener catches the rest.
+    this.listen(this.contentEl, "keydown", onKey);
+    this.listen(this.contentEl.ownerDocument || document, "keydown", onKey);
   }
 
-  private setupClickNavigation(container: HTMLElement): void {
-    const handleClick = (e: MouseEvent) => {
+  private setupClickNavigation(): void {
+    this.listen(this.contentEl, "click", (e: MouseEvent) => {
       if ((e.target as HTMLElement)?.closest(".marp-presentation-hud")) return;
-      if (Date.now() - this.lastTouchSwipeTime < 350) return;
+      if (Date.now() - this.lastTouchSwipeTime < 350) return; // ignore the click that follows a swipe
       if (this.session?.isBlackout || this.session?.isWhiteout) {
         this.session.clearBlank();
         return;
       }
-
-      const rect = container.getBoundingClientRect();
-      if (e.clientX - rect.left > rect.width * 0.4) {
-        this.session?.next();
-      } else {
-        this.session?.prev();
-      }
-    };
-
-    container.addEventListener("click", handleClick);
-    this.unsubs.push(() => container.removeEventListener("click", handleClick));
+      const rect = this.contentEl.getBoundingClientRect();
+      if (e.clientX - rect.left > rect.width * 0.4) this.session?.next();
+      else this.session?.prev();
+    });
   }
 
-  private setupTouchNavigation(container: HTMLElement): void {
-    const onTouchStart = (e: TouchEvent) => {
-      if ((e.target as HTMLElement)?.closest(".marp-presentation-hud")) return;
-      this.showHudTemporarily();
-      if (e.touches.length > 0) {
-        this.touchStartX = e.touches[0].clientX;
-        this.touchStartY = e.touches[0].clientY;
-      }
-    };
+  private setupTouchNavigation(): void {
+    const el = this.contentEl;
+    const inHud = (e: Event) => !!(e.target as HTMLElement)?.closest(".marp-presentation-hud");
 
-    const onTouchMove = (e: TouchEvent) => {
-      if (e.touches.length > 0) {
-        const dx = e.touches[0].clientX - this.touchStartX;
-        const dy = e.touches[0].clientY - this.touchStartY;
+    this.listen(el, "touchstart", (e: TouchEvent) => {
+      if (inHud(e)) return;
+      this.showHudTemporarily();
+      const touch = e.touches[0];
+      if (touch) {
+        this.touchStartX = touch.clientX;
+        this.touchStartY = touch.clientY;
+      }
+    });
+
+    // Block scrolling while a horizontal swipe is in progress.
+    this.listen(
+      el,
+      "touchmove",
+      (e: TouchEvent) => {
+        const touch = e.touches[0];
+        if (!touch) return;
+        const dx = touch.clientX - this.touchStartX;
+        const dy = touch.clientY - this.touchStartY;
         if (Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy)) {
           e.preventDefault();
           e.stopPropagation();
         }
-      }
-    };
+      },
+      { passive: false },
+    );
 
     const onTouchEnd = (e: TouchEvent) => {
-      if ((e.target as HTMLElement)?.closest(".marp-presentation-hud")) return;
-      if (e.changedTouches.length === 0) return;
-      const dx = e.changedTouches[0].clientX - this.touchStartX;
-      const dy = e.changedTouches[0].clientY - this.touchStartY;
+      if (inHud(e)) return;
+      const touch = e.changedTouches[0];
+      if (!touch) return;
+      const dx = touch.clientX - this.touchStartX;
+      const dy = touch.clientY - this.touchStartY;
       if (Math.abs(dx) > 50 && Math.abs(dy) < 100) {
         this.lastTouchSwipeTime = Date.now();
         if (dx < 0) this.session?.next();
         else this.session?.prev();
       }
     };
-
-    container.addEventListener("touchstart", onTouchStart, { passive: true });
-    container.addEventListener("touchmove", onTouchMove, { passive: false });
-    container.addEventListener("touchend", onTouchEnd, { passive: true });
-    container.addEventListener("touchcancel", onTouchEnd, { passive: true });
-    this.unsubs.push(() => {
-      container.removeEventListener("touchstart", onTouchStart);
-      container.removeEventListener("touchmove", onTouchMove);
-      container.removeEventListener("touchend", onTouchEnd);
-      container.removeEventListener("touchcancel", onTouchEnd);
-    });
+    this.listen(el, "touchend", onTouchEnd);
+    this.listen(el, "touchcancel", onTouchEnd);
   }
 
-  private setupAutoScaling(container: HTMLElement): void {
+  private setupAutoScaling(): void {
     const applyScale = () => {
-      const w = container.clientWidth || window.innerWidth;
-      const h = container.clientHeight || window.innerHeight;
+      const w = this.contentEl.clientWidth || window.innerWidth;
+      const h = this.contentEl.clientHeight || window.innerHeight;
       if (w > 0 && h > 0) {
         this.slideWrapperEl.style.transform = `translate(-50%, -50%) scale(${Math.min(w / SLIDE_W, h / SLIDE_H)})`;
       }
     };
 
-    this.resizeObserver = new ResizeObserver(() => requestAnimationFrame(applyScale));
-    this.resizeObserver.observe(container);
+    const observer = new ResizeObserver(() => requestAnimationFrame(applyScale));
+    observer.observe(this.contentEl);
+    this.unsubs.push(() => observer.disconnect());
     applyScale();
   }
 
-  public isPopout(): boolean {
-    const doc = this.containerEl.ownerDocument;
-    return doc !== undefined && doc !== document;
-  }
-
-  public async enterFullscreen(retries = Platform.isDesktop ? 6 : 0): Promise<boolean> {
-    try {
-      await hideMobileStatusBar();
-      const win = (this.containerEl.ownerDocument?.defaultView || window) as any;
-      const doc = this.containerEl.ownerDocument || document;
-
-      // In Obsidian desktop, electronWindow.setFullScreen provides guaranteed native window fullscreen
-      if (win?.electronWindow && typeof win.electronWindow.setFullScreen === "function") {
-        if (!win.electronWindow.isFullScreen?.()) {
-          win.electronWindow.setFullScreen(true);
-        }
-        return true;
-      }
-
-      if (doc.fullscreenElement || (doc as any).webkitFullscreenElement) {
-        return true;
-      }
-
-      const target = (Platform.isDesktop ? this.containerEl : (doc.documentElement || this.containerEl)) as HTMLElement;
-      if (typeof target?.requestFullscreen === "function") {
-        await target.requestFullscreen({ navigationUI: "hide" } as any);
-        return true;
-      }
-      if (typeof (target as any)?.webkitRequestFullscreen === "function") {
-        await (target as any).webkitRequestFullscreen();
-        return true;
-      }
-      if (typeof this.containerEl?.requestFullscreen === "function") {
-        await this.containerEl.requestFullscreen();
-        return true;
-      }
-    } catch {
-      if (retries > 0) {
-        await new Promise((resolve) => setTimeout(resolve, 100));
-        return this.enterFullscreen(retries - 1);
-      }
-      return false;
-    }
-    return false;
-  }
-
-  public async exitFullscreen(): Promise<void> {
-    try {
-      await showMobileStatusBar();
-      const win = (this.containerEl.ownerDocument?.defaultView || window) as any;
-      if (win?.electronWindow && typeof win.electronWindow.isFullScreen === "function" && win.electronWindow.isFullScreen()) {
-        win.electronWindow.setFullScreen(false);
-      }
-      const doc = this.containerEl.ownerDocument || document;
-      if (doc.fullscreenElement) {
-        await doc.exitFullscreen();
-      } else if (typeof (doc as any)?.webkitExitFullscreen === "function") {
-        await (doc as any).webkitExitFullscreen();
-      }
-    } catch {}
-  }
-
-  public async exitPresentation(): Promise<void> {
-    if (this.isExiting) return;
-    this.isExiting = true;
-    await this.exitFullscreen();
-    const win = this.containerEl.ownerDocument?.defaultView as any;
-    const isPopout = this.isPopout();
-    this.leaf.detach();
-    if (isPopout && win && win !== window && !win.closed && typeof win.close === "function") {
-      try {
-        win.close();
-      } catch {}
-    }
-  }
-
   private cleanup(): void {
-    if (this.hudHideTimeout) clearTimeout(this.hudHideTimeout);
-    this.resizeObserver?.disconnect();
-    this.resizeObserver = null;
+    clearTimeout(this.hudHideTimeout);
     for (const unsub of this.unsubs) unsub();
     this.unsubs = [];
     this.session?.release();
