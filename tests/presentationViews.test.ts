@@ -322,41 +322,56 @@ describe('MarpPresentationView and MarpPresenterView', () => {
       await view.onClose();
     });
 
-    it('supports mobile touch interactions: wakes HUD on touch and navigates on horizontal swipe', async () => {
+    it('advances on tap inside the slide; links and media stay interactive', async () => {
       const leaf = createMockLeaf(app);
       const view = new MarpPresentationView(leaf as any, mockPlugin as any);
+      document.body.appendChild(view.containerEl);
       await view.onOpen();
       await view.loadFile(mockFile as any, 0);
 
       expect(view.session?.currentSlide).toBe(0);
+      const doc = (view as any).iframe.contentDocument;
+      expect(doc).not.toBeNull();
 
-      // Touch start wakes HUD
+      // Plain tap advances to the next slide
+      doc.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      expect(view.session?.currentSlide).toBe(1);
+
+      // A click on a link opens it externally instead of advancing
+      const openSpy = vi.spyOn(window, 'open').mockReturnValue(null);
+      doc.body.innerHTML = '<a href="https://example.com">link</a>';
+      const clickEvent = new MouseEvent('click', { bubbles: true, cancelable: true });
+      doc.querySelector('a').dispatchEvent(clickEvent);
+      expect(clickEvent.defaultPrevented).toBe(true);
+      expect(openSpy).toHaveBeenCalledWith('https://example.com', '_blank');
+      expect(view.session?.currentSlide).toBe(1);
+
+      // A click on a video is left to the native controls
+      doc.body.innerHTML = '<video src="movie.mp4" controls></video>';
+      doc.querySelector('video').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      expect(view.session?.currentSlide).toBe(1);
+
+      // A drag (click far from the mousedown point) does not advance
+      doc.body.innerHTML = '<p>text</p>';
+      doc.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: 100, clientY: 100 }));
+      doc.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 400, clientY: 300 }));
+      expect(view.session?.currentSlide).toBe(1);
+
+      await view.onClose();
+    });
+
+    it('wakes the HUD on touch inside the slide iframe', async () => {
+      const leaf = createMockLeaf(app);
+      const view = new MarpPresentationView(leaf as any, mockPlugin as any);
+      document.body.appendChild(view.containerEl);
+      await view.onOpen();
+      await view.loadFile(mockFile as any, 0);
+
       const hud = view.contentEl.querySelector('.marp-presentation-hud');
       hud?.classList.remove('is-visible');
 
-      const touchStart = new TouchEvent('touchstart', {
-        touches: [{ clientX: 300, clientY: 200 } as any],
-      });
-      view.contentEl.dispatchEvent(touchStart);
+      (view as any).iframe.contentDocument.dispatchEvent(new TouchEvent('touchstart'));
       expect(hud?.classList.contains('is-visible')).toBe(true);
-
-      // Horizontal swipe left (next slide)
-      const touchEndLeft = new TouchEvent('touchend', {
-        changedTouches: [{ clientX: 100, clientY: 210 } as any],
-      });
-      view.contentEl.dispatchEvent(touchEndLeft);
-      expect(view.session?.currentSlide).toBe(1);
-
-      // Horizontal swipe right (previous slide)
-      const touchStart2 = new TouchEvent('touchstart', {
-        touches: [{ clientX: 100, clientY: 200 } as any],
-      });
-      view.contentEl.dispatchEvent(touchStart2);
-      const touchEndRight = new TouchEvent('touchend', {
-        changedTouches: [{ clientX: 300, clientY: 205 } as any],
-      });
-      view.contentEl.dispatchEvent(touchEndRight);
-      expect(view.session?.currentSlide).toBe(0);
 
       await view.onClose();
     });

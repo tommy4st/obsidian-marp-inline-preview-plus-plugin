@@ -123,9 +123,16 @@ export function handleBasePresentationKey(e: KeyboardEvent, session: Presentatio
   }
 }
 
-export function createSlideIframe(): HTMLIFrameElement {
+/**
+ * Interactive iframes (presentation view) receive pointer events so links and
+ * videos in the slide work, and get `allow-scripts` because nested embeds
+ * (e.g. YouTube iframes) inherit the sandbox and need scripts to play.
+ */
+export function createSlideIframe(interactive = false): HTMLIFrameElement {
   const iframe = createBaseIframe();
-  iframe.style.cssText = `width:${SLIDE_W}px;height:${SLIDE_H}px;border:0;display:block;background:transparent;pointer-events:none;`;
+  iframe.style.cssText =
+    `width:${SLIDE_W}px;height:${SLIDE_H}px;border:0;display:block;background:transparent;` +
+    (interactive ? '' : 'pointer-events:none;');
   return iframe;
 }
 

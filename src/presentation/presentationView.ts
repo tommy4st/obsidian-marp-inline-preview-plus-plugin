@@ -53,10 +53,9 @@ export class MarpPresentationView extends ItemView {
   private laser: LaserPointerOverlay | null = null;
   private laserBtn: HTMLElement | null = null;
   private unsubs: Array<() => void> = [];
-  private touchStartX = 0;
-  private touchStartY = 0;
-  private lastTouchSwipeTime = 0;
   private isExiting = false;
+  /** True when a click ends a drag (moved > 5px since mousedown) — not a tap. */
+  private dragGuard: ((e: MouseEvent) => boolean) | null = null;
 
   constructor(leaf: WorkspaceLeaf, private plugin: MarpInlinePreviewPlugin) {
     super(leaf);
@@ -98,16 +97,16 @@ export class MarpPresentationView extends ItemView {
     this.slideWrapperEl = stageEl.createDiv({ cls: "marp-presentation-slide-wrapper" });
     this.slideWrapperEl.style.width = `${SLIDE_W}px`;
     this.slideWrapperEl.style.height = `${SLIDE_H}px`;
-    this.iframe = createSlideIframe();
+    this.iframe = createSlideIframe(true);
     this.slideWrapperEl.appendChild(this.iframe);
 
     this.blankOverlayEl = contentEl.createDiv({ cls: "marp-presentation-blank-overlay" });
 
     this.buildHud();
     this.setupPresentationTools();
-    this.setupKeyboardNavigation();
+    const onKey = this.setupKeyboardNavigation();
     this.setupClickNavigation();
-    this.setupTouchNavigation();
+    this.setupSlideInteractions(onKey);
     this.setupAutoScaling();
 
     if (this.deck) {
@@ -337,7 +336,7 @@ export class MarpPresentationView extends ItemView {
     return isViewInFocus(this);
   }
 
-  private setupKeyboardNavigation(): void {
+  private setupKeyboardNavigation(): (e: KeyboardEvent) => void {
     const onKey = (e: KeyboardEvent) => {
       if (!this.session || (e as any)._marpHandled || !this.isViewInFocus()) return;
       if (isEditableElement(e.target as Element) || e.ctrlKey || e.metaKey || e.altKey) return;
@@ -356,67 +355,81 @@ export class MarpPresentationView extends ItemView {
     // Container listener catches non-bubbling dispatches; document listener catches the rest.
     this.listen(this.contentEl, "keydown", onKey);
     this.listen(this.contentEl.ownerDocument || document, "keydown", onKey);
+    return onKey;
   }
 
+  /** Clicks that miss the slide (letterbox area / blank overlay) also advance. */
   private setupClickNavigation(): void {
     this.listen(this.contentEl, "click", (e: MouseEvent) => {
       if (isOverPresentationControl(e.target)) return;
-      if (Date.now() - this.lastTouchSwipeTime < 350) return; // ignore the click that follows a swipe
       if (this.session?.isBlackout || this.session?.isWhiteout) {
         this.session.clearBlank();
         return;
       }
-      const rect = this.contentEl.getBoundingClientRect();
-      if (e.clientX - rect.left > rect.width * 0.4) this.session?.next();
-      else this.session?.prev();
+      this.session?.next();
     });
   }
 
-  private setupTouchNavigation(): void {
-    const el = this.contentEl;
-    const inHud = (e: Event) => isOverPresentationControl(e.target);
-
-    this.listen(el, "touchstart", (e: TouchEvent) => {
-      if (inHud(e)) return;
-      this.showHudTemporarily();
-      const touch = e.touches[0];
-      if (touch) {
-        this.touchStartX = touch.clientX;
-        this.touchStartY = touch.clientY;
+  /**
+   * The slide iframe receives pointer events so links and videos inside the
+   * slide are interactive. The about:blank document is mutated in place by
+   * paintFrame (never reloaded), so listeners attached once here survive
+   * slide re-paints. Any other tap advances to the next slide.
+   */
+  private setupSlideInteractions(onKey: (e: KeyboardEvent) => void): void {
+    const doc = this.iframe.contentDocument;
+    if (!doc) {
+      // The iframe's document may not exist yet in a fresh popout — retry once.
+      const win = this.iframe.ownerDocument?.defaultView || window;
+      win.requestAnimationFrame(() => this.setupSlideInteractions(onKey));
+      return;
+    }
+    doc.addEventListener("click", (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      const anchor = target?.closest?.("a[href]") as HTMLAnchorElement | null;
+      if (anchor) {
+        e.preventDefault();
+        this.openLink(anchor.getAttribute("href") ?? "");
+        return;
       }
+      // Native media/embed interaction — don't treat it as a tap-to-advance.
+      if (target?.closest?.("video, audio, iframe")) return;
+      if (this.dragGuard?.(e)) return; // drag, not a tap
+      this.session?.next();
     });
+    // Pointer events no longer bubble out of the iframe, so wake the HUD here too.
+    doc.addEventListener("mousemove", () => this.showHudTemporarily());
+    doc.addEventListener("touchstart", () => this.showHudTemporarily(), { passive: true });
+    // A click inside the iframe moves keyboard focus into it; keep nav keys working.
+    doc.addEventListener("keydown", onKey);
 
-    // Block scrolling while a horizontal swipe is in progress.
-    this.listen(
-      el,
-      "touchmove",
-      (e: TouchEvent) => {
-        const touch = e.touches[0];
-        if (!touch) return;
-        const dx = touch.clientX - this.touchStartX;
-        const dy = touch.clientY - this.touchStartY;
-        if (Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy)) {
-          e.preventDefault();
-          e.stopPropagation();
-        }
-      },
-      { passive: false },
-    );
+    // Slides are for showing, not selecting: kill text selection, and don't
+    // advance when the click ends a drag (e.g. a selection attempt).
+    const style = doc.createElement("style");
+    style.textContent = "body { user-select: none; -webkit-user-select: none; }";
+    doc.head.appendChild(style);
+    let downX = 0;
+    let downY = 0;
+    doc.addEventListener("mousedown", (e: MouseEvent) => {
+      downX = e.clientX;
+      downY = e.clientY;
+    });
+    this.dragGuard = (e: MouseEvent) => Math.hypot(e.clientX - downX, e.clientY - downY) > 5;
+  }
 
-    const onTouchEnd = (e: TouchEvent) => {
-      if (inHud(e)) return;
-      const touch = e.changedTouches[0];
-      if (!touch) return;
-      const dx = touch.clientX - this.touchStartX;
-      const dy = touch.clientY - this.touchStartY;
-      if (Math.abs(dx) > 50 && Math.abs(dy) < 100) {
-        this.lastTouchSwipeTime = Date.now();
-        if (dx < 0) this.session?.next();
-        else this.session?.prev();
-      }
-    };
-    this.listen(el, "touchend", onTouchEnd);
-    this.listen(el, "touchcancel", onTouchEnd);
+  private openLink(href: string): void {
+    if (!href || href.startsWith("#")) return;
+    // Absolute URL / URI scheme → system browser via Obsidian's window.open.
+    if (/^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(href)) {
+      this.viewWindow.open(href, "_blank");
+      return;
+    }
+    // Vault-relative link → open the note inside Obsidian.
+    let linkpath = href.split("#")[0];
+    try {
+      linkpath = decodeURIComponent(linkpath);
+    } catch {}
+    if (linkpath) void this.app.workspace.openLinkText(linkpath, this.file?.path ?? "", false);
   }
 
   private setupAutoScaling(): void {
