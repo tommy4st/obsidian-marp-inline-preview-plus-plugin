@@ -4,7 +4,7 @@ Render [Marp](https://marp.app/) slide decks directly inside Obsidian — inline
 
 | Mode | What you see |
 | --- | --- |
-| **Edit / Live Preview** | A rendered slide widget appears under each slide break. Updates as you type. |
+| **Edit / Live Preview** | A rendered slide widget appears near each slide break (configurable position). Updates as you type. |
 | **Reading** | The entire page is replaced by the rendered Marp deck. |
 
 Only files whose YAML frontmatter contains `marp: true` are touched. Everything else renders as ordinary Markdown.
@@ -12,14 +12,15 @@ Only files whose YAML frontmatter contains `marp: true` are touched. Everything 
 ## Features
 
 - **Marp Core 4 under the hood** — same renderer as the official Marp tooling, in pure JavaScript so it works on Obsidian Mobile (iOS & Android).
-- **Presentation & Presenter Views** — dual-screen audience presentation with auto-scaling, keyboard/touch navigation, screen blanking, and a dedicated speaker dashboard (timer, clock, upcoming slide preview, markdown notes, two-way sync).
+- **Presentation & Presenter Views** — dual-screen audience presentation with auto-scaling, interactive slide elements, ephemeral laser pointer, keyboard and tap navigation, screen blanking, and a dedicated speaker dashboard (timer, clock, upcoming slide preview, markdown notes, two-way sync).
+- **One-click note header presentation button** — quick-launch button in Markdown note headers with right-click shortcuts to start presentation, open presenter view, or export to PDF.
 - **Zero-external-dependency PDF export on desktop** — exports vector PDFs with slide dimensions, optional presenter note annotations, and configurable image DPI downsampling presets without requiring Chrome or external CLI tools.
-- **Customizable edit preview width** — configure the maximum width of inline slide widgets (match editor line width, 800px, 1000px, full width 100%, or custom CSS dimensions).
+- **Configurable edit preview position & width** — place previews before the divider, after the divider, or at the top of the slide; configure maximum width (match editor line width, 800px, 1000px, full width 100%, or custom CSS dimensions).
 - **Vault images & background support** — vault-relative paths in Markdown images (`![](...)`), Marp background images (`![bg](...)`), and custom stylesheet URLs are automatically rewritten to Obsidian resource URLs.
 - **Custom theme support** through `.marprc.yml` (vault-root, with a fallback to the slide file's folder), plus the standard frontmatter `theme:` directive.
 - **Bundled KaTeX math** — no network roundtrips, no broken formulae offline.
 - **Encapsulated styles** — Marp's per-slide CSS is mounted inside Shadow DOM, so it can't leak into Obsidian's own UI.
-- **Pluggable settings** — configure edit/reading previews, preview width, math rendering, PDF export options, and presentation defaults from Settings.
+- **Pluggable settings** — configure edit/reading previews, preview position and width, math rendering, PDF export options, and presentation defaults from Settings.
 
 ## Quick start
 
@@ -77,7 +78,7 @@ theme: my-theme
 You can export your presentation slides to a clean vector PDF directly inside Obsidian Desktop without installing Google Chrome or external tools:
 
 1. Open a slide file with `marp: true` in its frontmatter.
-2. Open the Command Palette (`Ctrl/Cmd + P`) and select **Marp: Export slide deck to PDF...** (or right-click the note in the file explorer and choose **Export Marp to PDF...**).
+2. Open the Command Palette (`Ctrl/Cmd + P`) and select **Marp: Export slide deck to PDF...** (or right-click the note header icon / file explorer / editor and choose **Export Marp to PDF...**).
 3. Configure your export options:
    - **Output file path**: Vault-relative path for the exported `.pdf` file (defaults to `<note-name>.pdf`).
    - **Image quality / DPI**:
@@ -94,23 +95,32 @@ You can export your presentation slides to a clean vector PDF directly inside Ob
 Present your slide deck directly within Obsidian or across dual monitors with a dedicated speaker companion screen:
 
 1. Open any slide file with `marp: true` in its frontmatter.
-2. Open the Command Palette (`Ctrl/Cmd + P`) and choose **Marp: Start presentation** (or right-click the note and select **Start Marp presentation**).
+2. Launch the presentation using any of the following:
+   - Click the **Presentation icon** in the note header (next to the reading/editing switcher).
+   - Open the Command Palette (`Ctrl/Cmd + P`) and choose **Marp: Start presentation**.
+   - Right-click the note in the file explorer or editor and choose **Start Marp presentation**.
 
 ### Features
 
 - **Audience Presentation View**:
-  - Automatically launches in fullscreen (on the second screen when dual displays are detected, leaving your main Obsidian window free).
+  - Automatically launches in fullscreen (on the second screen when dual displays are detected on Desktop, leaving your main Obsidian window free).
+  - Uses native Electron fullscreen on Desktop; exiting fullscreen cleans up and exits the presentation.
   - Maintains 16:9 aspect ratio with auto-scaling and letterboxing.
-  - Auto-hiding HUD toolbar with slide progress and navigation buttons.
-  - Keyboard navigation: `Space` / `ArrowRight` / `PageDown` to advance; `ArrowLeft` / `PageUp` to go back; `Home` / `End` for first/last slide.
-  - Screen blanking: press `B` or `.` for blackout, `W` for whiteout.
-  - Fullscreen toggle with `F`.
-  - Touch swipe navigation support on mobile and tablets.
-  - Live reload: edits to the slide file automatically update the presentation in real time.
-
+  - Auto-hiding HUD toolbar with slide progress (`Slide X / Y`), slide navigation buttons, laser pointer toggle, and presenter view shortcut.
+  - **Ephemeral laser pointer overlay**: toggle the crosshair button in the HUD to draw on slides with a smooth, decaying laser trail and glowing hotspot.
+  - **Interactive slide content**: links (external URLs in browser, internal note links in Obsidian) and media embeds (`<video>`, `<iframe>`, audio) are fully interactive inside slides.
+  - **Tap & Click navigation**: clicking or tapping outside interactive elements advances to the next slide (drag gestures for text selection are ignored). Clicks on blank margins or blackout/whiteout screens resume presentation.
+  - **Keyboard navigation**:
+    - `Space` / `ArrowRight` / `PageDown` / `Enter` to advance.
+    - `ArrowLeft` / `PageUp` / `Backspace` to go back.
+    - `Home` / `End` for first/last slide.
+    - `B` or `.` for blackout, `W` for whiteout.
+    - `P` to open Presenter View (when multiple screens are connected).
+    - `Escape` to exit presentation.
+  - **Live reload**: edits to the slide file automatically update the presentation in real time.
 
 - **Presenter View (Speaker Dashboard)**:
-  - Opens conveniently in an Obsidian tab by pressing `P` or selecting **Marp: Open presenter view** (or right-clicking the note and choosing **Open Marp presenter view**).
+  - Opens conveniently in an Obsidian tab by pressing `P` in presentation mode, clicking the Presenter button in the HUD, or selecting **Marp: Open presenter view** (also available in note context menus).
   - **Current & Next Slide Previews**: See what the audience sees plus an upcoming preview of the next slide.
   - **Rich Speaker Notes**: Slide comments (`<!-- ... -->`) are rendered as formatted Markdown with adjustable font sizes (`A-` / `A+`).
   - **Timer & Wall Clock**: Built-in stopwatch with Start/Pause/Reset controls plus local wall clock.
@@ -121,7 +131,8 @@ Present your slide deck directly within Obsidian or across dual monitors with a 
 ## Settings
 
 ### Preview & Math
-- **Inline preview in edit mode** — toggle the CodeMirror slide widgets.
+- **Inline preview in edit mode** — toggle slide previews directly in the editor.
+- **Preview slide position** — choose where slide previews appear relative to slide content and dividers (`Before divider (bottom of slide)`, `After divider (below divider line)`, or `Top of slide (above slide content)`).
 - **Preview slide maximum width** — choose the maximum width of preview slides in edit mode (`Match editor line width (default)`, `800px`, `1000px`, `Full width (100%)`, or `Custom width...`).
 - **Custom maximum width** — specify any CSS width (e.g. `850px`, `50rem`, `75%`) when "Custom width..." is chosen.
 - **Full preview in reading mode** — toggle the full deck render in reading mode.
@@ -134,6 +145,7 @@ Present your slide deck directly within Obsidian or across dual monitors with a 
 
 ### Presentation
 - **Auto-open presenter view** — automatically open the Presenter View in an Obsidian tab when starting a presentation (Desktop only).
+- **Show presentation button in note header** — show a button next to the reading/editing switcher to start the presentation.
 
 ### Commands
 - `Marp: Refresh Marp previews` — forces a full reload of previews and custom themes.
@@ -142,10 +154,12 @@ Present your slide deck directly within Obsidian or across dual monitors with a 
 - `Marp: Export slide deck to PDF...` — opens the PDF export dialog for the active Marp note (Desktop only).
 
 ### Context Menu Actions
-Right-clicking any note with `marp: true` in its frontmatter provides:
-- **Start Marp presentation**
-- **Open Marp presenter view**
-- **Export Marp to PDF...** (Desktop only)
+- **Note Header Action Button**: Left-click to start presentation; right-click for a menu with **Start Marp presentation**, **Open Marp presenter view** (if multi-screen), and **Export Marp to PDF...** (Desktop only).
+- **File Explorer Context Menu**: Right-clicking any note with `marp: true` in its frontmatter provides:
+  - **Start Marp presentation**
+  - **Open Marp presenter view** (if multi-screen)
+  - **Export Marp to PDF...** (Desktop only)
+- **Editor Context Menu**: Right-clicking inside the editor of a Marp note provides **Start Marp presentation**.
 
 ## Install: build locally and copy into another vault
 
@@ -241,7 +255,10 @@ Available scripts:
 - `npm run dev:vault` — links plugin files into `test-vault/.obsidian/plugins/` and starts watch mode.
 - `npm run build` — type checks and builds production bundle (`main.js`).
 - `npm test` — runs Vitest test suites (unit, DOM, snapshots, bundle smoke).
+- `npm run test:watch` — runs Vitest in watch mode.
 - `npm run test:bundle` — validates bundle compatibility with `check-bundle.mjs` and `es-check`.
+- `npm run test:e2e` — runs WDIO Obsidian E2E tests.
+- `npm run check:types` — runs `tsc --noEmit` type checking.
 - `npm run ci` — runs type checks, build, test suites, and bundle checks.
 
 Project layout:
@@ -258,6 +275,8 @@ src/
 │   ├── template.ts      Printable HTML payload builder
 │   └── types.ts         Export options and presets
 ├── presentation/        Presentation & Presenter View subsystem
+│   ├── headerAction.ts  Markdown view header presentation button + context menu
+│   ├── laserPointer.ts  Ephemeral laser pointer canvas overlay
 │   ├── service.ts       Launch orchestration & multi-display window management
 │   ├── session.ts       Bidirectional state synchronization & event bus
 │   ├── presentationView.ts Fullscreen audience display view & HUD
@@ -265,6 +284,7 @@ src/
 │   └── types.ts         Presentation state & view interfaces
 ├── marp/
 │   ├── engine.ts        Marp Core wrapper (themes, render helpers, comments)
+│   ├── frontmatter.ts   Frontmatter extraction & marp directive validation
 │   ├── themes.ts        .marprc.yml discovery and theme registration
 │   └── slides.ts        Slide-break detection (frontmatter & fence aware)
 ├── reading/
