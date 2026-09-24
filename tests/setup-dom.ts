@@ -106,6 +106,9 @@ if (typeof HTMLCanvasElement !== 'undefined') {
         save: () => {},
         restore: () => {},
         scale: () => {},
+        quadraticCurveTo: () => {},
+        setTransform: () => {},
+        createRadialGradient: () => ({ addColorStop: () => {} }),
       };
     }
     return orig?.call(this, type, ...args);

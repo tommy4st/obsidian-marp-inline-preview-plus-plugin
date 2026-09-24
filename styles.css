@@ -212,7 +212,9 @@ body:has(.workspace-leaf.mod-active .marp-presentation-view) .workspace-leaf-con
   opacity: 0;
   pointer-events: none;
   transition: all 0.25s ease;
-  z-index: 20;
+  /* Above the laser canvas (z 100) so its buttons stay clickable while the
+     laser pointer is armed. */
+  z-index: 150;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -276,6 +278,30 @@ body:has(.workspace-leaf.mod-active .marp-presentation-view) .workspace-leaf-con
 .marp-presentation-view.is-cursor-hidden,
 .marp-presentation-view.is-cursor-hidden * {
   cursor: none !important;
+}
+
+/* Laser pointer overlay — above slides/blank overlay, below the HUD. */
+.marp-laser-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  background: transparent;
+  z-index: 100;
+  pointer-events: none; /* toggled inline by LaserPointerOverlay.enable/disable */
+  touch-action: none;
+}
+
+/* Laser toggle active state inside the presentation HUD. */
+.marp-presentation-hud-btn.is-active {
+  color: #ff4545;
+  background: rgba(255, 69, 69, 0.16);
+}
+
+.marp-presentation-hud-btn.is-active:hover {
+  color: #ff6b6b;
+  background: rgba(255, 69, 69, 0.28);
 }
 
 /*

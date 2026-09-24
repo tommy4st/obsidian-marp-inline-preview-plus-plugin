@@ -161,6 +161,32 @@ describe('MarpPresentationView and MarpPresenterView', () => {
       await view.onClose();
     });
 
+    it('mounts the laser overlay, wires the HUD toggle, and cleans up on close', async () => {
+      const leaf = createMockLeaf(app);
+      const view = new MarpPresentationView(leaf as any, mockPlugin as any);
+
+      await view.onOpen();
+
+      const canvas = view.contentEl.querySelector('.marp-laser-canvas') as HTMLCanvasElement;
+      expect(canvas).not.toBeNull();
+      expect(canvas.style.pointerEvents).toBe('none'); // inert until toggled
+
+      const btn = view.contentEl.querySelector(
+        'button[title="Toggle Laser Pointer"]',
+      ) as HTMLButtonElement;
+      expect(btn).not.toBeNull();
+      expect(btn.closest('.marp-presentation-hud')).not.toBeNull(); // lives in the HUD
+      btn.click();
+      expect(canvas.style.pointerEvents).toBe('auto');
+      expect(btn.classList.contains('is-active')).toBe(true);
+      btn.click();
+      expect(canvas.style.pointerEvents).toBe('none');
+      expect(btn.classList.contains('is-active')).toBe(false);
+
+      await view.onClose();
+      expect(view.contentEl.querySelector('.marp-laser-canvas')).toBeNull();
+    });
+
     it('loads file, creates session, and responds to keyboard navigation', async () => {
       const leaf = createMockLeaf(app);
       const view = new MarpPresentationView(leaf as any, mockPlugin as any);

@@ -41,7 +41,10 @@ export type PresentationMessage =
 
 export function safePaintFrame(iframe: HTMLIFrameElement, html: string, css: string): void {
   if (!paintFrame(iframe, html, css)) {
-    requestAnimationFrame(() => {
+    // Retry on the iframe's own window: the presentation may live in a popout,
+    // and the main window's rAF is throttled to ~1Hz while that popout covers it.
+    const win = iframe.ownerDocument?.defaultView || window;
+    win.requestAnimationFrame(() => {
       if (!paintFrame(iframe, html, css)) {
         setTimeout(() => paintFrame(iframe, html, css), 60);
       }

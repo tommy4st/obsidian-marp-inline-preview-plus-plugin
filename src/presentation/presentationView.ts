@@ -14,8 +14,15 @@ import {
   safePaintFrame,
 } from "./types";
 import { hasMultipleScreens, observeScreenChanges, openPresenterView } from "./service";
+import { LaserPointerOverlay } from "./laserPointer";
 
 const HUD_AUTOHIDE_MS = 2500;
+/** Elements that must never trigger slide navigation clicks/swipes. */
+const CONTROL_SELECTOR = ".marp-presentation-hud, .marp-laser-canvas";
+
+function isOverPresentationControl(target: EventTarget | null): boolean {
+  return !!(target as HTMLElement | null)?.closest?.(CONTROL_SELECTOR);
+}
 const END_OF_DECK_HTML = '<div class="marp-inline-preview"><section><h1>End of Deck</h1></section></div>';
 
 /** Toggle the Capacitor status bar so fullscreen is truly edge-to-edge on mobile. */
@@ -42,6 +49,9 @@ export class MarpPresentationView extends ItemView {
   private hudCounterEl!: HTMLElement;
   private presenterBtn: HTMLElement | null = null;
   private hudHideTimeout?: ReturnType<typeof setTimeout>;
+  private presenterCheckAt = 0;
+  private laser: LaserPointerOverlay | null = null;
+  private laserBtn: HTMLElement | null = null;
   private unsubs: Array<() => void> = [];
   private touchStartX = 0;
   private touchStartY = 0;
@@ -94,6 +104,7 @@ export class MarpPresentationView extends ItemView {
     this.blankOverlayEl = contentEl.createDiv({ cls: "marp-presentation-blank-overlay" });
 
     this.buildHud();
+    this.setupPresentationTools();
     this.setupKeyboardNavigation();
     this.setupClickNavigation();
     this.setupTouchNavigation();
@@ -255,6 +266,7 @@ export class MarpPresentationView extends ItemView {
 
     navBtn("chevron-left", "Previous Slide (Left Arrow)", () => this.session?.prev());
     navBtn("chevron-right", "Next Slide (Right Arrow / Space)", () => this.session?.next());
+    this.laserBtn = navBtn("crosshair", "Toggle Laser Pointer", () => this.toggleLaser());
     this.presenterBtn = navBtn("presentation", "Open Presenter View (P)", () => this.openPresenter());
     this.updatePresenterButtonVisibility();
     this.unsubs.push(observeScreenChanges(() => this.updatePresenterButtonVisibility(), this.viewWindow));
@@ -270,6 +282,21 @@ export class MarpPresentationView extends ItemView {
     this.showHudTemporarily();
   }
 
+  /** Mount the laser pointer overlay; its toggle lives in the HUD. */
+  private setupPresentationTools(): void {
+    this.laser = new LaserPointerOverlay(this.contentEl, {
+      onStateChange: (enabled) => this.laserBtn?.toggleClass("is-active", enabled),
+      // The canvas consumes pointer events, so wake the HUD from here.
+      onInteract: () => this.showHudTemporarily(),
+    });
+  }
+
+  private toggleLaser(): void {
+    if (!this.laser) return;
+    if (this.laser.isEnabled) this.laser.disable();
+    else this.laser.enable();
+  }
+
   private openPresenter(): void {
     if (!this.file) return;
     void openPresenterView(this.app, this.plugin, this.file, {
@@ -278,7 +305,16 @@ export class MarpPresentationView extends ItemView {
   }
 
   private showHudTemporarily(): void {
-    this.updatePresenterButtonVisibility();
+    // hasMultipleScreens() is a synchronous Electron IPC call; re-evaluating it
+    // on every HUD wake (i.e. every pointermove while the laser is armed)
+    // saturates the renderer thread and starves requestAnimationFrame.
+    // The screen-change observer handles dynamic updates; this is just a
+    // low-frequency fallback re-check.
+    const now = Date.now();
+    if (now - this.presenterCheckAt >= 2000) {
+      this.presenterCheckAt = now;
+      this.updatePresenterButtonVisibility();
+    }
     this.hudEl.addClass("is-visible");
     this.contentEl.removeClass("is-cursor-hidden");
     clearTimeout(this.hudHideTimeout);
@@ -324,7 +360,7 @@ export class MarpPresentationView extends ItemView {
 
   private setupClickNavigation(): void {
     this.listen(this.contentEl, "click", (e: MouseEvent) => {
-      if ((e.target as HTMLElement)?.closest(".marp-presentation-hud")) return;
+      if (isOverPresentationControl(e.target)) return;
       if (Date.now() - this.lastTouchSwipeTime < 350) return; // ignore the click that follows a swipe
       if (this.session?.isBlackout || this.session?.isWhiteout) {
         this.session.clearBlank();
@@ -338,7 +374,7 @@ export class MarpPresentationView extends ItemView {
 
   private setupTouchNavigation(): void {
     const el = this.contentEl;
-    const inHud = (e: Event) => !!(e.target as HTMLElement)?.closest(".marp-presentation-hud");
+    const inHud = (e: Event) => isOverPresentationControl(e.target);
 
     this.listen(el, "touchstart", (e: TouchEvent) => {
       if (inHud(e)) return;
@@ -392,7 +428,10 @@ export class MarpPresentationView extends ItemView {
       }
     };
 
-    const observer = new ResizeObserver(() => requestAnimationFrame(applyScale));
+    // rAF must come from the view's own window: in a popout presentation the
+    // main window's rAF is throttled to ~1Hz while the popout covers it.
+    const viewWin = this.contentEl.ownerDocument?.defaultView || window;
+    const observer = new ResizeObserver(() => viewWin.requestAnimationFrame(applyScale));
     observer.observe(this.contentEl);
     this.unsubs.push(() => observer.disconnect());
     applyScale();
@@ -400,6 +439,8 @@ export class MarpPresentationView extends ItemView {
 
   private cleanup(): void {
     clearTimeout(this.hudHideTimeout);
+    this.laser?.destroy();
+    this.laser = null;
     for (const unsub of this.unsubs) unsub();
     this.unsubs = [];
     this.session?.release();
