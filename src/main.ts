@@ -19,6 +19,19 @@ export default class MarpInlinePreviewPlugin extends Plugin {
   themes!: ThemeResolver;
   headerActions!: HeaderActionManager;
 
+  private marpCheckCallback(
+    action: (file: TFile) => void,
+    predicate?: () => boolean,
+  ): (checking: boolean) => boolean {
+    return (checking: boolean) => {
+      if (predicate && !predicate()) return false;
+      const file = this.app.workspace.getActiveFile();
+      if (!isMarpFile(this.app, file)) return false;
+      if (!checking && file) action(file);
+      return true;
+    };
+  }
+
   async onload(): Promise<void> {
     await this.loadSettings();
     this.applyEditPreviewWidth();
@@ -88,64 +101,37 @@ export default class MarpInlinePreviewPlugin extends Plugin {
     this.addCommand({
       id: 'marp-start-presentation',
       name: 'Start presentation',
-      checkCallback: (checking: boolean) => {
-        const file = this.app.workspace.getActiveFile();
-        if (!file) return false;
-        const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
-        const isMarp = fm?.marp === true || fm?.marp === 'true';
-        if (!isMarp) return false;
-
-        if (!checking) {
-          void startPresentation(this.app, this, file);
-        }
-        return true;
-      },
+      checkCallback: this.marpCheckCallback((file) => {
+        void startPresentation(this.app, this, file);
+      }),
     });
 
     this.addCommand({
       id: 'marp-open-presenter-view',
       name: 'Open presenter view',
-      checkCallback: (checking: boolean) => {
-        const file = this.app.workspace.getActiveFile();
-        if (!file) return false;
-        const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
-        const isMarp = fm?.marp === true || fm?.marp === 'true';
-        if (!isMarp) return false;
-
-        if (!checking) {
-          void openPresenterView(this.app, this, file);
-        }
-        return true;
-      },
+      checkCallback: this.marpCheckCallback((file) => {
+        void openPresenterView(this.app, this, file);
+      }),
     });
 
     this.addCommand({
       id: 'marp-export-pdf',
       name: 'Export slide deck to PDF...',
-      checkCallback: (checking: boolean) => {
-        if (!Platform.isDesktop) return false;
-        const file = this.app.workspace.getActiveFile();
-        if (!file) return false;
-        const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
-        const isMarp = fm?.marp === true || fm?.marp === 'true';
-        if (!isMarp) return false;
-
-        if (!checking) {
+      checkCallback: this.marpCheckCallback(
+        (file) => {
           openPdfExportModal(file, {
             plugin: this,
             engine: this.engine,
             themes: this.themes,
           });
-        }
-        return true;
-      },
+        },
+        () => Platform.isDesktop,
+      ),
     });
 
     this.registerEvent(
       this.app.workspace.on('file-menu', (menu, file) => {
-        if (file instanceof TFile && file.extension === 'md') {
-          const fm = this.app.metadataCache.getFileCache(file)?.frontmatter;
-          if (fm?.marp === true || fm?.marp === 'true') {
+        if (file instanceof TFile && isMarpFile(this.app, file)) {
             menu.addItem((item) => {
               item
                 .setTitle('Start Marp presentation')
@@ -181,9 +167,8 @@ export default class MarpInlinePreviewPlugin extends Plugin {
               });
             }
           }
-        }
-      }),
-    );
+        }),
+      );
 
     this.registerEvent(
       this.app.workspace.on('editor-menu', (menu, _editor, view) => {

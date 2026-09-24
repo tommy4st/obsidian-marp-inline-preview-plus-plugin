@@ -8,9 +8,8 @@ import {
 } from '@codemirror/view';
 import { Extension, RangeSetBuilder, StateEffect, StateField } from '@codemirror/state';
 import type { MarpEngine } from '../marp/engine';
-import type { ThemeResolver } from '../marp/themes';
+import { resolveThemeAndMd, type ThemeResolver } from '../marp/themes';
 import { findSlideBreaks, type LineRange } from '../marp/slides';
-import { injectThemeIfMissing } from '../marp/frontmatter';
 import { SlidePlaceholder } from './widget';
 import { SlideStage, type SlideContent } from './stage';
 import { debounce } from '../util/debounce';
@@ -142,37 +141,35 @@ export function buildEditorExtension(deps: EditorDeps): Extension {
         this.stage.destroy();
       }
 
+      private clear(): void {
+        this.stage.syncSlides([]);
+        this.push(Decoration.none);
+      }
+
       async rebuild(): Promise<void> {
         if (!deps.enabled()) {
-          this.stage.syncSlides([]);
-          this.push(Decoration.none);
+          this.clear();
           return;
         }
 
         const runId = ++this.latestRunId;
         const file = resolveFile(deps.app, this.view);
         if (!file) {
-          this.stage.syncSlides([]);
-          this.push(Decoration.none);
+          this.clear();
           return;
         }
 
         const cache = deps.app.metadataCache.getFileCache(file);
         const fm = cache?.frontmatter ?? {};
         if (fm.marp !== true && fm.marp !== 'true') {
-          this.stage.syncSlides([]);
-          this.push(Decoration.none);
+          this.clear();
           return;
         }
 
         try {
           const rawSrc = this.view.state.doc.toString();
-          const fmTheme = typeof fm.theme === 'string' && fm.theme.length > 0 ? fm.theme : null;
-          // collect() registers themeSet entries with the engine as a side
-          // effect and returns the theme name that should be applied.
-          const theme = await deps.themes.collect(file, fmTheme);
+          const { md: mdForMarp } = await resolveThemeAndMd(deps.themes, file, rawSrc, fm);
           if (runId !== this.latestRunId || this.destroyed) return;
-          const mdForMarp = fmTheme ? rawSrc : injectThemeIfMissing(rawSrc, theme);
 
           const rendered = deps.engine.renderArray(mdForMarp);
           const fullCss = rewriteCssUrls(rendered.css, file.path, deps.app);

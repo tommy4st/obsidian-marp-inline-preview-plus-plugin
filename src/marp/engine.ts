@@ -10,7 +10,7 @@ function build(opts: EngineOptions): Marp {
     inlineSVG: true,
     script: false,
     html: true,
-    math: opts.math === false ? false : 'katex',
+    math: opts.math,
     // Convert :memo: → 📝 as native unicode; leave existing unicode emoji as-is.
     // No Twemoji CDN fetch in either case.
     emoji: { shortcode: true, unicode: false },

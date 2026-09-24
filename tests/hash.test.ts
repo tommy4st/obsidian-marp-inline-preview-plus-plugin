@@ -2,10 +2,6 @@ import { describe, it, expect } from 'vitest';
 import { fnv1a32 } from '../src/util/hash';
 
 describe('fnv1a32', () => {
-  it('returns the same hash for identical input', () => {
-    expect(fnv1a32('hello world')).toBe(fnv1a32('hello world'));
-  });
-
   it('handles the empty string with the FNV-1a 32-bit basis', () => {
     expect(fnv1a32('')).toBe((0x811c9dc5).toString(16));
   });

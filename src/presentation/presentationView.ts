@@ -7,6 +7,8 @@ import {
   SlideDeckData,
   createIconButton,
   createSlideIframe,
+  handleBasePresentationKey,
+  initializeDeckSession,
   isEditableElement,
   isViewInFocus,
   loadSlideDeck,
@@ -16,41 +18,27 @@ import { openPresenterView, hasMultipleScreens, observeScreenChanges } from './s
 
 import { LaserPointer, createExcalidrawLaserTrail } from './laserPointer';
 
-export async function hideMobileStatusBar(): Promise<void> {
+export async function setMobileStatusBar(visible: boolean): Promise<void> {
   try {
     const win = (typeof window !== 'undefined' ? window : globalThis) as any;
     const cap = win?.Capacitor;
     const statusBar = cap?.Plugins?.StatusBar ?? win?.StatusBar;
     if (statusBar) {
-      if (typeof statusBar.hide === 'function') {
-        await statusBar.hide();
-      }
-      if (typeof statusBar.setOverlaysWebView === 'function') {
-        await statusBar.setOverlaysWebView({ overlay: true });
+      if (visible) {
+        if (typeof statusBar.show === 'function') await statusBar.show();
+        if (typeof statusBar.setOverlaysWebView === 'function') await statusBar.setOverlaysWebView({ overlay: false });
+      } else {
+        if (typeof statusBar.hide === 'function') await statusBar.hide();
+        if (typeof statusBar.setOverlaysWebView === 'function') await statusBar.setOverlaysWebView({ overlay: true });
       }
     }
   } catch (err) {
-    console.debug('[marp-presentation] hideMobileStatusBar error:', err);
+    console.debug(`[marp-presentation] setMobileStatusBar(${visible}) error:`, err);
   }
 }
 
-export async function showMobileStatusBar(): Promise<void> {
-  try {
-    const win = (typeof window !== 'undefined' ? window : globalThis) as any;
-    const cap = win?.Capacitor;
-    const statusBar = cap?.Plugins?.StatusBar ?? win?.StatusBar;
-    if (statusBar) {
-      if (typeof statusBar.show === 'function') {
-        await statusBar.show();
-      }
-      if (typeof statusBar.setOverlaysWebView === 'function') {
-        await statusBar.setOverlaysWebView({ overlay: false });
-      }
-    }
-  } catch (err) {
-    console.debug('[marp-presentation] showMobileStatusBar error:', err);
-  }
-}
+export const hideMobileStatusBar = () => setMobileStatusBar(false);
+export const showMobileStatusBar = () => setMobileStatusBar(true);
 
 export class MarpPresentationView extends ItemView {
   public file: TFile | null = null;
@@ -181,10 +169,6 @@ export class MarpPresentationView extends ItemView {
     setTimeout(focusView, 50);
     setTimeout(focusView, 150);
 
-    try {
-      this.app.workspace.leftSplit?.collapse?.();
-      this.app.workspace.rightSplit?.collapse?.();
-    } catch {}
   }
 
   async onClose(): Promise<void> {
@@ -201,17 +185,15 @@ export class MarpPresentationView extends ItemView {
     if (!this.file) return;
 
     try {
-      this.deck = await loadSlideDeck(this.plugin, this.file);
-
-      if (!this.session) {
-        this.session = PresentationSession.getOrCreate(this.file.path, this.deck.slides.length);
-        if (initialSlideIndex !== undefined && initialSlideIndex >= 0) {
-          this.session.goTo(initialSlideIndex, false);
-        }
-        this.attachSessionListeners();
-      } else {
-        this.session.setTotalSlides(this.deck.slides.length);
-      }
+      const { deck, session } = await initializeDeckSession(
+        this.plugin,
+        this.file,
+        this.session,
+        initialSlideIndex,
+        (s) => this.attachSessionListeners(s),
+      );
+      this.deck = deck;
+      this.session = session;
 
       this.renderCurrentSlide();
       this.updateHud();
@@ -220,17 +202,18 @@ export class MarpPresentationView extends ItemView {
     }
   }
 
-  private attachSessionListeners(): void {
-    if (!this.session) return;
+  private attachSessionListeners(session = this.session): void {
+    if (!session) return;
+    this.session = session;
 
     this.unsubs.push(
-      this.session.on('slide-change', () => {
+      session.on('slide-change', () => {
         this.clearLaserTrails();
         this.renderCurrentSlide();
         this.updateHud();
       }),
-      this.session.on('blank-change', (blank) => this.updateBlankOverlay(blank)),
-      this.session.on('destroy', () => {
+      session.on('blank-change', (blank) => this.updateBlankOverlay(blank)),
+      session.on('destroy', () => {
         this.session = null;
       }),
     );
@@ -442,12 +425,7 @@ export class MarpPresentationView extends ItemView {
 
     this.showHudTemporarily();
 
-    if (this.isLaserActive) {
-      try {
-        this.app.workspace.leftSplit?.collapse?.();
-        this.app.workspace.rightSplit?.collapse?.();
-      } catch {}
-    } else {
+    if (!this.isLaserActive) {
       this.clearLaserTrails();
       if (this.laserAnimId !== null) {
         cancelAnimationFrame(this.laserAnimId);
@@ -557,38 +535,9 @@ export class MarpPresentationView extends ItemView {
     const handleKeydown = (e: KeyboardEvent) => {
       if (isEditableElement(e.target as Element)) return;
       if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (handleBasePresentationKey(e, this.session)) return;
 
       switch (e.key) {
-        case 'ArrowRight':
-        case 'PageDown':
-        case ' ':
-        case 'Enter':
-          e.preventDefault();
-          this.session?.next();
-          break;
-        case 'ArrowLeft':
-        case 'PageUp':
-        case 'Backspace':
-          e.preventDefault();
-          this.session?.prev();
-          break;
-        case 'Home':
-          e.preventDefault();
-          this.session?.first();
-          break;
-        case 'End':
-          e.preventDefault();
-          this.session?.last();
-          break;
-        case 'b':
-        case '.':
-          e.preventDefault();
-          this.session?.toggleBlackout();
-          break;
-        case 'w':
-          e.preventDefault();
-          this.session?.toggleWhiteout();
-          break;
         case 'l':
         case 'L':
           e.preventDefault();

@@ -1,6 +1,6 @@
 import { Modal, Setting, Notice, normalizePath } from 'obsidian';
 import type MarpInlinePreviewPlugin from '../main';
-import type { ImageQualityPreset, PdfExportOptions } from './types';
+import { IMAGE_QUALITY_OPTIONS, type ImageQualityPreset, type PdfExportOptions } from './types';
 
 export class ExportPdfModal extends Modal {
   private targetPath: string;
@@ -42,17 +42,13 @@ export class ExportPdfModal extends Modal {
     new Setting(contentEl)
       .setName('Image quality / DPI')
       .setDesc('Optimize raster images to reduce exported PDF file size')
-      .addDropdown((drop) =>
-        drop
-          .addOption('original', 'Original (No compression)')
-          .addOption('high', 'High (~300 DPI, 4K max)')
-          .addOption('medium', 'Medium (~150 DPI, 1080p max)')
-          .addOption('low', 'Low (~96 DPI, 720p max)')
-          .setValue(this.imageQuality)
+      .addDropdown((drop) => {
+        IMAGE_QUALITY_OPTIONS.forEach(([val, label]) => drop.addOption(val, label));
+        drop.setValue(this.imageQuality)
           .onChange((value) => {
             this.imageQuality = value as ImageQualityPreset;
-          }),
-      );
+          });
+      });
 
     new Setting(contentEl)
       .setName('Include presenter notes')

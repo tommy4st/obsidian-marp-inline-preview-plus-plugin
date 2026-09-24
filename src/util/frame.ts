@@ -89,14 +89,19 @@ export function paintFrame(iframe: HTMLIFrameElement, slideHtml: string, css: st
   return true;
 }
 
+export function createBaseIframe(): HTMLIFrameElement {
+  const iframe = document.createElement('iframe');
+  iframe.setAttribute('sandbox', 'allow-same-origin');
+  iframe.setAttribute('scrolling', 'no');
+  iframe.setAttribute('tabindex', '-1');
+  return iframe;
+}
+
 function ensureIframe(host: HTMLElement): HTMLIFrameElement {
   let iframe = host.querySelector(':scope > iframe') as HTMLIFrameElement | null;
   if (iframe) return iframe;
-  iframe = document.createElement('iframe');
-  iframe.setAttribute('sandbox', 'allow-same-origin');
-  iframe.setAttribute('scrolling', 'no');
+  iframe = createBaseIframe();
   iframe.setAttribute('loading', 'eager');
-  iframe.setAttribute('tabindex', '-1');
   // Fixed intrinsic dimensions — see header comment. `transform-origin` keeps
   // the scaled iframe anchored to the host's top-left so it occupies the
   // expected box; the host has `overflow: hidden` to clip the rest.

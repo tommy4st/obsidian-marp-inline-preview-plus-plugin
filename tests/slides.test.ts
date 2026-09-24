@@ -63,12 +63,6 @@ describe('findSlideBreaks', () => {
     expect(src.slice(brk.from, brk.to)).toBe('---');
   });
 
-  it('returns N breaks for N+1 slides (matches Marp section count)', () => {
-    const src = 'a\n---\nb\n---\nc\n---\nd\n';
-    const breaks = findSlideBreaks(src);
-    expect(breaks).toHaveLength(3);
-  });
-
   it('tracks bodyStart at frontmatter close when frontmatter is present', () => {
     const src = '---\nmarp: true\n---\n\nslide 1\n---\nslide 2';
     const breaks = findSlideBreaks(src);

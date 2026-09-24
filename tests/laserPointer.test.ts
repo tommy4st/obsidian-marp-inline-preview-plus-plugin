@@ -34,7 +34,9 @@ describe('LaserPointer Math & Outline', () => {
     expect(lerped[1]).toBe(5);
 
     expect(normAngle(Math.PI * 3)).toBeCloseTo(Math.PI);
+    expect(runLength([[0, 0, 0], [3, 4, 0]])).toBe(5);
     expect(runLength([[0, 0, 0], [3, 4, 0], [3, 4, 0]])).toBe(5);
+    expect(runLength([[0, 0, 0], [3, 4, 0], [6, 8, 0]])).toBe(10);
   });
 
   it('simplifies lines using douglasPeucker', () => {

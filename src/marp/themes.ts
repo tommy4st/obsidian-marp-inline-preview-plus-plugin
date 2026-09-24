@@ -1,6 +1,21 @@
 import { App, TFile, normalizePath } from 'obsidian';
 import yaml from 'js-yaml';
 import type { MarpEngine } from './engine';
+import { injectThemeIfMissing } from './frontmatter';
+
+export const MARPRC_NAMES = ['.marprc.yml', '.marprc.yaml'] as const;
+
+export async function resolveThemeAndMd(
+  themes: ThemeResolver,
+  file: TFile,
+  src: string,
+  fm?: Record<string, unknown> | null,
+): Promise<{ theme: string | null; md: string }> {
+  const fmTheme = typeof fm?.theme === 'string' && fm.theme.length > 0 ? fm.theme : null;
+  const theme = await themes.collect(file, fmTheme);
+  const md = fmTheme ? src : injectThemeIfMissing(src, theme);
+  return { theme, md };
+}
 
 type Marprc = {
   theme?: string;
@@ -66,12 +81,12 @@ export class ThemeResolver {
 
   private async findMarprc(file: TFile): Promise<string | null> {
     const adapter = this.app.vault.adapter;
-    for (const name of ['.marprc.yml', '.marprc.yaml']) {
+    for (const name of MARPRC_NAMES) {
       if (await adapter.exists(name)) return name;
     }
     const dir = file.parent?.path;
     if (dir && dir !== '/') {
-      for (const name of ['.marprc.yml', '.marprc.yaml']) {
+      for (const name of MARPRC_NAMES) {
         const p = normalizePath(`${dir}/${name}`);
         if (await adapter.exists(p)) return p;
       }

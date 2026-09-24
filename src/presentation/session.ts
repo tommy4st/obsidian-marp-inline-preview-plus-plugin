@@ -143,13 +143,17 @@ export class PresentationSession {
 
   // --- Timer Controls ---
 
+  private notifyTimer(): void {
+    this.emit('timer-tick', { ...this.timer });
+    this.emit('state-change', this.getState());
+  }
+
   public startTimer(broadcast = true): void {
     if (this.timer.isRunning) return;
     this.timer.isRunning = true;
     this.timer.startedAt = Date.now();
     this.startTimerInterval();
-    this.emit('timer-tick', { ...this.timer });
-    this.emit('state-change', this.getState());
+    this.notifyTimer();
     if (broadcast) this.postMessage({ type: 'TIMER_CONTROL', action: 'start' });
   }
 
@@ -158,16 +162,14 @@ export class PresentationSession {
     this.timer.isRunning = false;
     this.timer.startedAt = null;
     this.stopTimerInterval();
-    this.emit('timer-tick', { ...this.timer });
-    this.emit('state-change', this.getState());
+    this.notifyTimer();
     if (broadcast) this.postMessage({ type: 'TIMER_CONTROL', action: 'pause' });
   }
 
   public resetTimer(broadcast = true): void {
     this.timer.elapsedSeconds = 0;
     if (this.timer.isRunning) this.timer.startedAt = Date.now();
-    this.emit('timer-tick', { ...this.timer });
-    this.emit('state-change', this.getState());
+    this.notifyTimer();
     if (broadcast) this.postMessage({ type: 'TIMER_CONTROL', action: 'reset' });
   }
 

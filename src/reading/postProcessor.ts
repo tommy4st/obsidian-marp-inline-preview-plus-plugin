@@ -1,7 +1,7 @@
 import { App, MarkdownPostProcessor, MarkdownPostProcessorContext, TFile } from 'obsidian';
 import type { MarpEngine } from '../marp/engine';
-import type { ThemeResolver } from '../marp/themes';
-import { injectThemeIfMissing } from '../marp/frontmatter';
+import { resolveThemeAndMd, type ThemeResolver } from '../marp/themes';
+import { isMarpFile } from '../presentation/headerAction';
 import { mountDeck } from '../util/frame';
 import { rewriteImageSrcs, rewriteCssUrls } from '../util/images';
 import { fnv1a32 } from '../util/hash';
@@ -35,19 +35,17 @@ export function buildReadingPostProcessor(deps: ReadingDeps): MarkdownPostProces
     }
     if (!host || host.offsetParent === null) return;
 
-    if (!isMarpFile(ctx, deps.app)) {
+    const ctxFm = (ctx as unknown as { frontmatter?: Record<string, unknown> }).frontmatter;
+    const file = deps.app.vault.getAbstractFileByPath(ctx.sourcePath);
+    if (!(file instanceof TFile) || !isMarpFile(deps.app, file, ctxFm)) {
       cleanup(host);
       return;
     }
 
-    const file = deps.app.vault.getAbstractFileByPath(ctx.sourcePath);
-    if (!(file instanceof TFile)) return;
-
     try {
       const src = await deps.app.vault.cachedRead(file);
-      const fmTheme = pickTheme(ctx, deps.app, file);
-      const theme = await deps.themes.collect(file, fmTheme);
-      const md = fmTheme ? src : injectThemeIfMissing(src, theme);
+      const fm = ctxFm ?? deps.app.metadataCache.getFileCache(file)?.frontmatter;
+      const { theme, md } = await resolveThemeAndMd(deps.themes, file, src, fm);
       const wantHash = fnv1a32(`${md}${theme ?? ''}`);
 
       const prior = renderState.get(host);
@@ -151,27 +149,3 @@ function ensureObserver(host: HTMLElement): void {
   }).observe(host, { childList: true });
 }
 
-function isMarpFile(ctx: MarkdownPostProcessorContext, app: App): boolean {
-  const fm = readFrontmatter(ctx, app);
-  return fm?.marp === true || fm?.marp === 'true';
-}
-
-function pickTheme(ctx: MarkdownPostProcessorContext, app: App, file: TFile): string | null {
-  const fm = readFrontmatter(ctx, app, file);
-  const t = fm?.theme;
-  return typeof t === 'string' && t.length > 0 ? t : null;
-}
-
-function readFrontmatter(
-  ctx: MarkdownPostProcessorContext,
-  app: App,
-  file?: TFile,
-): Record<string, unknown> | null {
-  const direct = (ctx as unknown as { frontmatter?: Record<string, unknown> }).frontmatter;
-  if (direct) return direct;
-  const tfile = file ?? app.vault.getAbstractFileByPath(ctx.sourcePath);
-  if (tfile instanceof TFile) {
-    return app.metadataCache.getFileCache(tfile)?.frontmatter ?? null;
-  }
-  return null;
-}

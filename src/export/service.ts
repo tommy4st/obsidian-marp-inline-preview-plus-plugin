@@ -1,8 +1,7 @@
 import { Notice, TFile, normalizePath } from 'obsidian';
 import type MarpInlinePreviewPlugin from '../main';
 import type { MarpEngine } from '../marp/engine';
-import type { ThemeResolver } from '../marp/themes';
-import { injectThemeIfMissing } from '../marp/frontmatter';
+import { resolveThemeAndMd, type ThemeResolver } from '../marp/themes';
 import { rewriteImageSrcs, rewriteCssUrls } from '../util/images';
 import { buildExportHtml } from './template';
 import { printHtmlToPdf } from './printer';
@@ -35,9 +34,7 @@ export async function exportDeckToPdf(
   try {
     const src = await app.vault.cachedRead(file);
     const fmCache = app.metadataCache.getFileCache(file)?.frontmatter;
-    const fmTheme = typeof fmCache?.theme === 'string' && fmCache.theme ? fmCache.theme : null;
-    const theme = await deps.themes.collect(file, fmTheme);
-    const md = fmTheme ? src : injectThemeIfMissing(src, theme);
+    const { md } = await resolveThemeAndMd(deps.themes, file, src, fmCache);
 
     // Single-pass render of the full slide deck with comments
     const rendered = deps.engine.render(md);

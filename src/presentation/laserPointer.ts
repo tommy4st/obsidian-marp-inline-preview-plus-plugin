@@ -56,10 +56,9 @@ export function dist([ax, ay]: Point, [bx, by]: Point): number {
 export function runLength(ps: Point[]): number {
   if (ps.length < 2) return 0;
   let len = 0;
-  for (let i = 1; i <= ps.length - 1; i++) {
+  for (let i = 1; i < ps.length; i++) {
     len += dist(ps[i - 1], ps[i]);
   }
-  len += dist(ps[ps.length - 2], ps[ps.length - 1]);
   return len;
 }
 

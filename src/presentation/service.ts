@@ -15,13 +15,17 @@ export interface DisplayBounds {
   height: number;
 }
 
+function resolveWin(win?: Window): any {
+  return win ?? (typeof window !== 'undefined' ? window : (globalThis as any));
+}
+
 /**
  * Retrieve Electron screen module if available in Desktop environment.
  */
 export function getElectronScreenModule(win?: Window): any {
   if (!Platform.isDesktop) return null;
 
-  const targetWin = win ?? (typeof window !== 'undefined' ? window : (globalThis as any));
+  const targetWin = resolveWin(win);
   try {
     const req = (targetWin as any)?.require ?? (window as any)?.require ?? (globalThis as any)?.require;
     if (typeof req === 'function') {
@@ -39,7 +43,7 @@ export function getElectronScreenModule(win?: Window): any {
 export function hasMultipleScreens(win?: Window): boolean {
   if (!Platform.isDesktop) return false;
 
-  const targetWin = win ?? (typeof window !== 'undefined' ? window : (globalThis as any));
+  const targetWin = resolveWin(win);
   try {
     const displays = getElectronScreenModule(targetWin)?.getAllDisplays?.();
     if (Array.isArray(displays)) return displays.length >= 2;
@@ -55,7 +59,7 @@ export function hasMultipleScreens(win?: Window): boolean {
  * Returns an unsubscribe cleanup function.
  */
 export function observeScreenChanges(callback: () => void, win?: Window): () => void {
-  const targetWin = win ?? (typeof window !== 'undefined' ? window : (globalThis as any));
+  const targetWin = resolveWin(win);
   const screenModule = getElectronScreenModule(targetWin);
   if (screenModule && typeof screenModule.on === 'function') {
     screenModule.on('display-added', callback);
@@ -83,7 +87,7 @@ export function observeScreenChanges(callback: () => void, win?: Window): () => 
 export function getOtherDisplayBounds(win?: Window): DisplayBounds | null {
   if (!Platform.isDesktop) return null;
 
-  const targetWin = win ?? (typeof window !== 'undefined' ? window : (globalThis as any));
+  const targetWin = resolveWin(win);
   try {
     const screenModule = getElectronScreenModule(targetWin);
     const displays = screenModule?.getAllDisplays?.();

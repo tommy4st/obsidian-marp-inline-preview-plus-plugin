@@ -52,18 +52,6 @@ function makeContext(opts: { sourcePath: string; frontmatter?: Frontmatter }) {
   } as unknown as import('obsidian').MarkdownPostProcessorContext;
 }
 
-function makeApp(opts: { source: string; frontmatter?: Frontmatter }) {
-  const file = { path: 'deck.md', name: 'deck.md', parent: { path: '/' } };
-  return {
-    vault: {
-      cachedRead: vi.fn(async () => opts.source),
-      getAbstractFileByPath: vi.fn(() => file),
-    },
-    metadataCache: {
-      getFileCache: vi.fn(() => ({ frontmatter: opts.frontmatter })),
-    },
-  } as any;
-}
 
 function makeThemes() {
   return { collect: vi.fn(async () => null), invalidate: vi.fn() } as any;

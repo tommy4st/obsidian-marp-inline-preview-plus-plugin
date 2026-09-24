@@ -9,6 +9,8 @@ export type SlideBreaks = LineRange[] & { bodyStart?: number };
 
 const FENCE_RE = /^(```+|~~~+)/;
 const BREAK_RE = /^-{3,}\s*$/;
+const BACKTICK_CLOSE_RE = /^`{3,}\s*$/;
+const TILDE_CLOSE_RE = /^~{3,}\s*$/;
 
 export function findSlideBreaks(source: string): SlideBreaks {
   const breaks: SlideBreaks = [];
@@ -34,7 +36,8 @@ export function findSlideBreaks(source: string): SlideBreaks {
         fenceMarker = m[1][0]; // ` or ~
       }
     } else if (fenceMarker) {
-      if (new RegExp(`^${fenceMarker === '`' ? '`' : '~'}{3,}\\s*$`).test(trimmed)) {
+      const closeRe = fenceMarker === '`' ? BACKTICK_CLOSE_RE : TILDE_CLOSE_RE;
+      if (closeRe.test(trimmed)) {
         inFence = false;
         fenceMarker = null;
       }

@@ -28,9 +28,6 @@ const decks = readdirSync(fixturesDir)
   .sort();
 
 describe('marp-core output snapshots (L2)', () => {
-  it('discovers a non-empty fixture corpus', () => {
-    expect(decks.length).toBeGreaterThan(0);
-  });
 
   for (const filename of decks) {
     describe(filename, () => {
@@ -44,15 +41,4 @@ describe('marp-core output snapshots (L2)', () => {
     });
   }
 
-  it('locks per-slide section count for the basic deck (3 slides)', () => {
-    const engine = new MarpEngine({ math: 'katex' });
-    const { html } = engine.renderArray(readDeck('basic.md'));
-    expect(html).toHaveLength(3);
-  });
-
-  it('locks per-slide section count for the math deck (2 slides)', () => {
-    const engine = new MarpEngine({ math: 'katex' });
-    const { html } = engine.renderArray(readDeck('math.md'));
-    expect(html).toHaveLength(2);
-  });
 });

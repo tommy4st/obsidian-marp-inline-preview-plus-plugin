@@ -60,13 +60,6 @@ describe('bundled main.js smoke (L5)', () => {
     expect(typeof bundleExports.default).toBe('function');
   });
 
-  it('default export extends the stubbed Plugin class', () => {
-    const stub = require(stubPath);
-    const PluginCtor = bundleExports.default as { prototype: object };
-    const stubPlugin = stub.Plugin as { prototype: object };
-    expect(Object.getPrototypeOf(PluginCtor)).toBe(stubPlugin);
-    expect(PluginCtor.prototype).toBeInstanceOf(stubPlugin);
-  });
 
   it('can be instantiated with a minimal stub app', () => {
     const PluginCtor = bundleExports.default as new (

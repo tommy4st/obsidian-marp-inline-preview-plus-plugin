@@ -3,9 +3,15 @@ import type MarpInlinePreviewPlugin from '../main';
 import { startPresentation, openPresenterView, hasMultipleScreens } from './service';
 import { openPdfExportModal } from '../export/service';
 
-export function isMarpFile(app: App, file: TFile | null | undefined): boolean {
-  if (!file || file.extension !== 'md') return false;
-  const fm = app.metadataCache.getFileCache(file)?.frontmatter;
+export function isMarpFile(
+  app: App,
+  file: TFile | null | undefined,
+  frontmatter?: Record<string, unknown> | null,
+): boolean {
+  if (!file) return false;
+  const ext = file.extension ?? (file.path?.endsWith('.md') ? 'md' : '');
+  if (ext !== 'md') return false;
+  const fm = frontmatter ?? app.metadataCache.getFileCache(file)?.frontmatter;
   return fm?.marp === true || fm?.marp === 'true';
 }
 

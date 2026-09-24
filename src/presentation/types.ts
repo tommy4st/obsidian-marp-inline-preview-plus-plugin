@@ -1,8 +1,9 @@
 import { ItemView, TFile, setIcon } from 'obsidian';
 import type MarpInlinePreviewPlugin from '../main';
-import { injectThemeIfMissing } from '../marp/frontmatter';
+import { resolveThemeAndMd } from '../marp/themes';
 import { rewriteCssUrls, rewriteImageSrcs } from '../util/images';
-import { SLIDE_H, SLIDE_W, paintFrame } from '../util/frame';
+import { SLIDE_H, SLIDE_W, createBaseIframe, paintFrame } from '../util/frame';
+import { PresentationSession } from './session';
 
 export const MARP_PRESENTATION_VIEW_TYPE = 'marp-presentation-view';
 export const MARP_PRESENTER_VIEW_TYPE = 'marp-presenter-view';
@@ -51,9 +52,7 @@ export function safePaintFrame(iframe: HTMLIFrameElement, html: string, css: str
 export async function loadSlideDeck(plugin: MarpInlinePreviewPlugin, file: TFile): Promise<SlideDeckData> {
   const src = await plugin.app.vault.cachedRead(file);
   const fm = plugin.app.metadataCache.getFileCache(file)?.frontmatter;
-  const fmTheme = typeof fm?.theme === 'string' && fm.theme ? fm.theme : null;
-  const theme = await plugin.themes.collect(file, fmTheme);
-  const md = fmTheme ? src : injectThemeIfMissing(src, theme);
+  const { md } = await resolveThemeAndMd(plugin.themes, file, src, fm);
   const rendered = plugin.engine.renderArray(md);
   return {
     slides: rendered.html.map((h) => rewriteImageSrcs(h, file.path, plugin.app)),
@@ -63,11 +62,66 @@ export async function loadSlideDeck(plugin: MarpInlinePreviewPlugin, file: TFile
   };
 }
 
+export async function initializeDeckSession(
+  plugin: MarpInlinePreviewPlugin,
+  file: TFile,
+  existingSession: PresentationSession | null,
+  initialSlideIndex?: number,
+  onAttach?: (session: PresentationSession) => void,
+): Promise<{ deck: SlideDeckData; session: PresentationSession }> {
+  const deck = await loadSlideDeck(plugin, file);
+  let session = existingSession;
+  if (!session) {
+    session = PresentationSession.getOrCreate(file.path, deck.slides.length);
+    if (initialSlideIndex !== undefined && initialSlideIndex >= 0) {
+      session.goTo(initialSlideIndex, false);
+    }
+    if (onAttach) onAttach(session);
+  } else {
+    session.setTotalSlides(deck.slides.length);
+  }
+  return { deck, session };
+}
+
+export function handleBasePresentationKey(e: KeyboardEvent, session: PresentationSession | null): boolean {
+  switch (e.key) {
+    case 'ArrowRight':
+    case 'PageDown':
+    case ' ':
+    case 'Enter':
+      e.preventDefault();
+      session?.next();
+      return true;
+    case 'ArrowLeft':
+    case 'PageUp':
+    case 'Backspace':
+      e.preventDefault();
+      session?.prev();
+      return true;
+    case 'Home':
+      e.preventDefault();
+      session?.first();
+      return true;
+    case 'End':
+      e.preventDefault();
+      session?.last();
+      return true;
+    case 'b':
+    case '.':
+      e.preventDefault();
+      session?.toggleBlackout();
+      return true;
+    case 'w':
+      e.preventDefault();
+      session?.toggleWhiteout();
+      return true;
+    default:
+      return false;
+  }
+}
+
 export function createSlideIframe(): HTMLIFrameElement {
-  const iframe = document.createElement('iframe');
-  iframe.setAttribute('sandbox', 'allow-same-origin');
-  iframe.setAttribute('scrolling', 'no');
-  iframe.setAttribute('tabindex', '-1');
+  const iframe = createBaseIframe();
   iframe.style.cssText = `width:${SLIDE_W}px;height:${SLIDE_H}px;border:0;display:block;background:transparent;pointer-events:none;`;
   return iframe;
 }

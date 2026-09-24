@@ -18,7 +18,7 @@
 // viewport-culling events without ever re-creating an iframe.
 
 import type { EditorView } from '@codemirror/view';
-import { paintFrame, SLIDE_W, SLIDE_H } from '../util/frame';
+import { createBaseIframe, paintFrame, SLIDE_W, SLIDE_H } from '../util/frame';
 
 const STAGE_CLASS = 'marp-slide-stage';
 const PLACEHOLDER_CLASS = 'marp-slide-placeholder';
@@ -89,7 +89,7 @@ export class SlideStage {
     const nodes = this.view.contentDOM.querySelectorAll<HTMLElement>(
       `.${PLACEHOLDER_CLASS}`,
     );
-    for (const ph of Array.from(nodes)) {
+    for (const ph of nodes) {
       const idxStr = ph.dataset.slideIndex;
       if (!idxStr) continue;
       const idx = Number(idxStr);
@@ -122,10 +122,7 @@ export class SlideStage {
   }
 
   private createIframe(): HTMLIFrameElement {
-    const iframe = document.createElement('iframe');
-    iframe.setAttribute('sandbox', 'allow-same-origin');
-    iframe.setAttribute('scrolling', 'no');
-    iframe.setAttribute('tabindex', '-1');
+    const iframe = createBaseIframe();
     // Fixed 1280×720 intrinsic viewport, scaled to placeholder width via
     // transform — keeps vh/vw inside the slide resolving the same as a
     // standalone Marp document. transform-origin top-left so translate +

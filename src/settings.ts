@@ -1,7 +1,8 @@
 import { App, PluginSettingTab, Setting } from 'obsidian';
 import type MarpInlinePreviewPlugin from './main';
+import { IMAGE_QUALITY_OPTIONS, type ExportImageQuality } from './export/types';
 
-export type ExportImageQuality = 'original' | 'high' | 'medium' | 'low';
+export type { ExportImageQuality };
 
 export type EditPreviewMaxWidth =
   | 'editor'
@@ -175,18 +176,14 @@ export class MarpSettingTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName('Default image quality / DPI')
       .setDesc('Optimize raster image resolution and compression to reduce PDF file size.')
-      .addDropdown((d) =>
-        d
-          .addOption('original', 'Original (No compression)')
-          .addOption('high', 'High (~300 DPI, 4K max)')
-          .addOption('medium', 'Medium (~150 DPI, 1080p max)')
-          .addOption('low', 'Low (~96 DPI, 720p max)')
-          .setValue(this.plugin.settings.exportImageQuality)
+      .addDropdown((d) => {
+        IMAGE_QUALITY_OPTIONS.forEach(([val, label]) => d.addOption(val, label));
+        d.setValue(this.plugin.settings.exportImageQuality)
           .onChange(async (v: ExportImageQuality) => {
             this.plugin.settings.exportImageQuality = v;
             await this.plugin.saveSettings();
-          }),
-      );
+          });
+      });
 
     containerEl.createEl('h3', { text: 'Presentation' });
 

@@ -10,6 +10,8 @@ import {
   createSlideIframe,
   formatClockTime,
   formatTime,
+  handleBasePresentationKey,
+  initializeDeckSession,
   isEditableElement,
   isViewInFocus,
   loadSlideDeck,
@@ -128,17 +130,15 @@ export class MarpPresenterView extends ItemView {
     if (!this.file) return;
 
     try {
-      this.deck = await loadSlideDeck(this.plugin, this.file);
-
-      if (!this.session) {
-        this.session = PresentationSession.getOrCreate(this.file.path, this.deck.slides.length);
-        if (initialSlideIndex !== undefined && initialSlideIndex >= 0) {
-          this.session.goTo(initialSlideIndex, false);
-        }
-        this.attachSessionListeners();
-      } else {
-        this.session.setTotalSlides(this.deck.slides.length);
-      }
+      const { deck, session } = await initializeDeckSession(
+        this.plugin,
+        this.file,
+        this.session,
+        initialSlideIndex,
+        (s) => this.attachSessionListeners(s),
+      );
+      this.deck = deck;
+      this.session = session;
 
       this.populateSlideDropdown();
       this.renderCurrentAndNextSlide();
@@ -149,18 +149,19 @@ export class MarpPresenterView extends ItemView {
     }
   }
 
-  private attachSessionListeners(): void {
-    if (!this.session) return;
+  private attachSessionListeners(session = this.session): void {
+    if (!session) return;
+    this.session = session;
 
     this.unsubs.push(
-      this.session.on('slide-change', () => {
+      session.on('slide-change', () => {
         this.renderCurrentAndNextSlide();
         void this.renderSpeakerNotes();
         this.updateControls();
       }),
-      this.session.on('timer-tick', (timer) => this.updateTimerDisplay(timer)),
-      this.session.on('blank-change', (blank) => this.updateBlankButtons(blank)),
-      this.session.on('destroy', () => {
+      session.on('timer-tick', (timer) => this.updateTimerDisplay(timer)),
+      session.on('blank-change', (blank) => this.updateBlankButtons(blank)),
+      session.on('destroy', () => {
         this.session = null;
       }),
     );
@@ -209,25 +210,25 @@ export class MarpPresenterView extends ItemView {
   private buildSlidePreviews(container: HTMLElement): void {
     const leftCol = container.createDiv({ cls: 'marp-presenter-previews-col' });
 
-    // Current Slide Card
-    const currentBox = leftCol.createDiv({ cls: 'marp-presenter-slide-card' });
-    currentBox.createDiv({ cls: 'marp-presenter-card-title', text: 'Current Slide (Audience)' });
-    const currentViewport = currentBox.createDiv({ cls: 'marp-presenter-viewport' });
-    this.currentSlideWrapper = currentViewport.createDiv({ cls: 'marp-presenter-slide-wrapper' });
-    this.currentSlideWrapper.style.width = `${SLIDE_W}px`;
-    this.currentSlideWrapper.style.height = `${SLIDE_H}px`;
-    this.currentIframe = createSlideIframe();
-    this.currentSlideWrapper.appendChild(this.currentIframe);
+    const createSlideCard = (title: string) => {
+      const card = leftCol.createDiv({ cls: 'marp-presenter-slide-card' });
+      card.createDiv({ cls: 'marp-presenter-card-title', text: title });
+      const viewport = card.createDiv({ cls: 'marp-presenter-viewport' });
+      const wrapper = viewport.createDiv({ cls: 'marp-presenter-slide-wrapper' });
+      wrapper.style.width = `${SLIDE_W}px`;
+      wrapper.style.height = `${SLIDE_H}px`;
+      const iframe = createSlideIframe();
+      wrapper.appendChild(iframe);
+      return { wrapper, iframe };
+    };
 
-    // Next Slide Card
-    const nextBox = leftCol.createDiv({ cls: 'marp-presenter-slide-card' });
-    nextBox.createDiv({ cls: 'marp-presenter-card-title', text: 'Next Slide' });
-    const nextViewport = nextBox.createDiv({ cls: 'marp-presenter-viewport' });
-    this.nextSlideWrapper = nextViewport.createDiv({ cls: 'marp-presenter-slide-wrapper' });
-    this.nextSlideWrapper.style.width = `${SLIDE_W}px`;
-    this.nextSlideWrapper.style.height = `${SLIDE_H}px`;
-    this.nextIframe = createSlideIframe();
-    this.nextSlideWrapper.appendChild(this.nextIframe);
+    const current = createSlideCard('Current Slide (Audience)');
+    this.currentSlideWrapper = current.wrapper;
+    this.currentIframe = current.iframe;
+
+    const next = createSlideCard('Next Slide');
+    this.nextSlideWrapper = next.wrapper;
+    this.nextIframe = next.iframe;
   }
 
   private buildNotesPane(container: HTMLElement): void {
@@ -392,42 +393,11 @@ export class MarpPresenterView extends ItemView {
     const handleKeydown = (e: KeyboardEvent) => {
       if (isEditableElement(e.target as Element)) return;
       if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (handleBasePresentationKey(e, this.session)) return;
 
-      switch (e.key) {
-        case 'ArrowRight':
-        case 'PageDown':
-        case ' ':
-        case 'Enter':
-          e.preventDefault();
-          this.session?.next();
-          break;
-        case 'ArrowLeft':
-        case 'PageUp':
-        case 'Backspace':
-          e.preventDefault();
-          this.session?.prev();
-          break;
-        case 'Home':
-          e.preventDefault();
-          this.session?.first();
-          break;
-        case 'End':
-          e.preventDefault();
-          this.session?.last();
-          break;
-        case 'b':
-        case '.':
-          e.preventDefault();
-          this.session?.toggleBlackout();
-          break;
-        case 'w':
-          e.preventDefault();
-          this.session?.toggleWhiteout();
-          break;
-        case 'Escape':
-          e.preventDefault();
-          this.leaf.detach();
-          break;
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        this.leaf.detach();
       }
     };
 
