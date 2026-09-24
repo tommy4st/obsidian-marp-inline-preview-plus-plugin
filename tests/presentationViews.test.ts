@@ -395,6 +395,67 @@ describe('MarpPresentationView and MarpPresenterView', () => {
       (window as any).require = originalRequire;
       await view.onClose();
     });
+
+    it('does not render a fullscreen toggle button in the HUD toolbar', async () => {
+      const leaf = createMockLeaf(app);
+      const view = new MarpPresentationView(leaf as any, mockPlugin as any);
+      await view.onOpen();
+
+      const hud = view.contentEl.querySelector('.marp-presentation-hud');
+      const fullscreenBtn = hud?.querySelector('button[title*="Fullscreen"]');
+      expect(fullscreenBtn).toBeNull();
+
+      await view.onClose();
+    });
+
+    it('pressing Escape key exits presentation view and detaches the leaf', async () => {
+      const origHasFocus = document.hasFocus;
+      document.hasFocus = () => true;
+      const leaf = createMockLeaf(app);
+      app.workspace.activeLeaf = leaf;
+      const view = new MarpPresentationView(leaf as any, mockPlugin as any);
+      await view.onOpen();
+      await view.loadFile(mockFile as any, 0);
+      document.body.appendChild(view.containerEl);
+
+      const escEvent = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true });
+      document.dispatchEvent(escEvent);
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(leaf.detach).toHaveBeenCalled();
+
+      view.containerEl.remove();
+      await view.onClose();
+      document.hasFocus = origHasFocus;
+    });
+
+    it('exiting fullscreen triggers presentation view exit', async () => {
+      const leaf = createMockLeaf(app);
+      const view = new MarpPresentationView(leaf as any, mockPlugin as any);
+      await view.onOpen();
+      await view.loadFile(mockFile as any, 0);
+
+      // Simulate entering fullscreen first
+      Object.defineProperty(document, 'fullscreenElement', {
+        value: view.containerEl,
+        configurable: true,
+        writable: true,
+      });
+      document.dispatchEvent(new Event('fullscreenchange'));
+
+      // Simulate exiting fullscreen (e.g. via browser Esc key or OS)
+      Object.defineProperty(document, 'fullscreenElement', {
+        value: null,
+        configurable: true,
+        writable: true,
+      });
+      document.dispatchEvent(new Event('fullscreenchange'));
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(leaf.detach).toHaveBeenCalled();
+
+      await view.onClose();
+    });
   });
 
   describe('MarpPresenterView', () => {

@@ -11,7 +11,6 @@ import {
   initializeDeckSession,
   isEditableElement,
   isViewInFocus,
-  loadSlideDeck,
   safePaintFrame,
 } from "./types";
 import { openPresenterView, hasMultipleScreens, observeScreenChanges } from "./service";
@@ -57,6 +56,8 @@ export class MarpPresentationView extends ItemView {
   private touchStartX = 0;
   private touchStartY = 0;
   private lastTouchSwipeTime = 0;
+  private isExiting = false;
+  private hasEnteredFullscreen = false;
 
   constructor(leaf: WorkspaceLeaf, private plugin: MarpInlinePreviewPlugin) {
     super(leaf);
@@ -128,29 +129,25 @@ export class MarpPresentationView extends ItemView {
     });
     this.registerEvent(fileModifyRef);
 
-    const onFocusOrClick = () => {
-      const doc = contentEl.ownerDocument || document;
-      if (!doc.fullscreenElement) {
-        void this.enterFullscreen();
+    // Presentation view is always fullscreen.
+    // If fullscreen is exited (e.g. by pressing Esc or OS action), exit the presentation view.
+    const doc = contentEl.ownerDocument || document;
+    const onFullscreenChange = () => {
+      if (doc.fullscreenElement) {
+        this.hasEnteredFullscreen = true;
+      } else if (this.hasEnteredFullscreen && !this.isExiting) {
+        void this.exitPresentation();
       }
     };
+    doc.addEventListener("fullscreenchange", onFullscreenChange);
+    this.unsubs.push(() => doc.removeEventListener("fullscreenchange", onFullscreenChange));
 
-    if (Platform.isDesktop && this.isPopout()) {
-      void this.enterFullscreen();
-      const win = contentEl.ownerDocument?.defaultView || window;
-      win.addEventListener("focus", onFocusOrClick);
-      this.unsubs.push(() => win.removeEventListener("focus", onFocusOrClick));
-    } else {
-      void this.enterFullscreen();
-    }
-
-    contentEl.addEventListener("pointerdown", onFocusOrClick);
-    this.unsubs.push(() => contentEl.removeEventListener("pointerdown", onFocusOrClick));
+    void this.enterFullscreen();
 
     const focusView = () => {
       try {
-        const doc = contentEl.ownerDocument || document;
-        doc.defaultView?.focus();
+        const d = contentEl.ownerDocument || document;
+        d.defaultView?.focus();
         contentEl.focus();
       } catch {}
     };
@@ -160,6 +157,7 @@ export class MarpPresentationView extends ItemView {
   }
 
   async onClose(): Promise<void> {
+    this.isExiting = true;
     void this.exitFullscreen();
     this.cleanup();
   }
@@ -252,11 +250,6 @@ export class MarpPresentationView extends ItemView {
       ),
     );
 
-    createIconButton(this.hudEl, "marp-presentation-hud-btn", "maximize", "Toggle Fullscreen (F)", (e) => {
-      e.stopPropagation();
-      this.toggleFullscreen();
-    });
-
     createIconButton(this.hudEl, "marp-presentation-hud-btn", "x", "Exit Presentation (Esc)", (e) => {
       e.stopPropagation();
       void this.exitPresentation();
@@ -335,11 +328,6 @@ export class MarpPresentationView extends ItemView {
             });
           }
           break;
-        case "f":
-        case "F":
-          e.preventDefault();
-          this.toggleFullscreen();
-          break;
         case "Escape":
           e.preventDefault();
           void this.exitPresentation();
@@ -390,10 +378,6 @@ export class MarpPresentationView extends ItemView {
     const onTouchStart = (e: TouchEvent) => {
       if ((e.target as HTMLElement)?.closest(".marp-presentation-hud")) return;
       this.showHudTemporarily();
-      const doc = container.ownerDocument || document;
-      if (!doc.fullscreenElement) {
-        void this.enterFullscreen();
-      }
       if (e.touches.length > 0) {
         this.touchStartX = e.touches[0].clientX;
         this.touchStartY = e.touches[0].clientY;
@@ -458,14 +442,19 @@ export class MarpPresentationView extends ItemView {
     try {
       await hideMobileStatusBar();
       const doc = this.containerEl.ownerDocument || document;
-      if (doc.fullscreenElement) return true;
+      if (doc.fullscreenElement) {
+        this.hasEnteredFullscreen = true;
+        return true;
+      }
       const target = (Platform.isDesktop ? this.containerEl : (doc.documentElement || this.containerEl)) as HTMLElement;
       if (typeof target?.requestFullscreen === "function") {
         await target.requestFullscreen({ navigationUI: "hide" } as any);
+        this.hasEnteredFullscreen = true;
         return true;
       }
       if (typeof this.containerEl?.requestFullscreen === "function") {
         await this.containerEl.requestFullscreen();
+        this.hasEnteredFullscreen = true;
         return true;
       }
     } catch {
@@ -489,17 +478,10 @@ export class MarpPresentationView extends ItemView {
   }
 
   public async exitPresentation(): Promise<void> {
+    if (this.isExiting) return;
+    this.isExiting = true;
     await this.exitFullscreen();
     this.leaf.detach();
-  }
-
-  private toggleFullscreen(): void {
-    const doc = this.containerEl.ownerDocument || document;
-    if (!doc.fullscreenElement) {
-      void this.enterFullscreen();
-    } else {
-      void this.exitFullscreen();
-    }
   }
 
   private cleanup(): void {
