@@ -22,7 +22,7 @@ npm run ci                # check:types → build → test → test:bundle (PR-e
 | Layer | Where | Runs on |
 |-------|-------|---------|
 | L0 build guards | `scripts/check-bundle.mjs` (banned requires + es-check es2020) | every PR via `ci.yml` |
-| L1 logic unit | `tests/{slides,hash,engine,frontmatter,themes,editorDecorations,exportImageOptimization,exportNotes,exportTemplate,images,presentationSession}.test.ts` (node env) | every PR |
+| L1 logic unit | `tests/{slides,engine,frontmatter,themes,editorDecorations,exportNotes,exportTemplate,images,presentationSession}.test.ts` (node env) | every PR |
 | L2 marp-core snapshot | `tests/marpCoreSnap.test.ts` + `tests/fixtures/decks/` + `tests/__snapshots__/` | every PR. Bless with `npx vitest -u tests/marpCoreSnap.test.ts` |
 | L3 DOM integration | `tests/{stageSyncSlides,frameMount,postProcessor,headerAction,presentationViews,settings}.test.ts` (happy-dom env via `// @vitest-environment happy-dom`) | every PR |
 | L4 Obsidian E2E | `tests/e2e/specs/*.e2e.ts`, `wdio.conf.mts`, fixture vault at `tests/e2e/fixtures/vault/` | nightly (`nightly.yml`) + release gate |
